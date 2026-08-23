@@ -1,0 +1,212 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile in the Online Corporate platform",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "bizName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["Employee", "Employer", "BusinessOwner"] },
+        "isVerified": { "type": "boolean" },
+        "isAdmin": { "type": "boolean" },
+        "occupation": { "type": "string", "maxLength": 100 },
+        "contact": { "type": "string", "maxLength": 100 },
+        "country": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "skills": { "type": "string", "maxLength": 1000 },
+        "resumeContent": { "type": "string", "maxLength": 5000 },
+        "photo": { "type": "string", "maxLength": 500000 },
+        "logo": { "type": "string", "maxLength": 500000 },
+        "speciality": { "type": "string", "maxLength": 100 },
+        "industry": { "type": "string", "maxLength": 100 },
+        "website": { "type": "string", "maxLength": 200 },
+        "location": { "type": "string", "maxLength": 100 },
+        "views": { "type": "number" },
+        "openToWork": { "type": "boolean" },
+        "assignedPost": { "type": "string", "maxLength": 100 },
+        "assignedBiz": { "type": "string", "maxLength": 100 },
+        "verificationPending": { "type": "boolean" },
+        "verificationDoc": { "type": "string", "maxLength": 500000 },
+        "verificationType": { "type": "string", "maxLength": 100 },
+        "verificationReason": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["email"]
+    },
+    "Job": {
+      "title": "Job",
+      "description": "Job opening posted by an employer or business",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "title": { "type": "string", "maxLength": 150 },
+        "type": { "type": "string", "enum": ["fulltime", "parttime", "contract", "remote"] },
+        "salary": { "type": "string", "maxLength": 100 },
+        "location": { "type": "string", "maxLength": 100 },
+        "contact": { "type": "string", "maxLength": 100 },
+        "desc": { "type": "string", "maxLength": 4000 },
+        "posterEmail": { "type": "string", "maxLength": 128 },
+        "posterName": { "type": "string", "maxLength": 100 },
+        "posterRole": { "type": "string", "maxLength": 50 },
+        "time": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "title", "type", "location", "contact", "desc", "posterEmail", "posterName", "posterRole", "time"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Public corporate announcement or hiring bulletin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "title": { "type": "string", "maxLength": 150 },
+        "type": { "type": "string", "enum": ["hiring", "looking", "general"] },
+        "occupation": { "type": "string", "maxLength": 100 },
+        "contact": { "type": "string", "maxLength": 100 },
+        "desc": { "type": "string", "maxLength": 4000 },
+        "posterEmail": { "type": "string", "maxLength": 128 },
+        "posterName": { "type": "string", "maxLength": 100 },
+        "posterRole": { "type": "string", "maxLength": 50 },
+        "time": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "title", "type", "contact", "desc", "posterEmail", "posterName", "posterRole", "time"]
+    },
+    "ProfessionalEvent": {
+      "title": "ProfessionalEvent",
+      "description": "Webinar, Meetup or Workshop event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "hostEmail": { "type": "string", "maxLength": 128 },
+        "hostName": { "type": "string", "maxLength": 100 },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 4000 },
+        "date": { "type": "string", "maxLength": 50 },
+        "location": { "type": "string", "maxLength": 150 },
+        "type": { "type": "string", "enum": ["Webinar", "Meetup", "Workshop"] },
+        "image": { "type": "string", "maxLength": 500000 }
+      },
+      "required": ["id", "hostEmail", "hostName", "title", "description", "date", "location", "type"]
+    },
+    "CommunityPost": {
+      "title": "CommunityPost",
+      "description": "Feed post shared in the professional community",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "authorEmail": { "type": "string", "maxLength": 128 },
+        "authorName": { "type": "string", "maxLength": 100 },
+        "authorPhoto": { "type": "string", "maxLength": 500000 },
+        "content": { "type": "string", "maxLength": 4000 },
+        "image": { "type": "string", "maxLength": 500000 },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "authorEmail", "authorName", "content", "timestamp"]
+    },
+    "JobApplication": {
+      "title": "JobApplication",
+      "description": "Application submitted for a job opening",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "jobId": { "type": "string", "maxLength": 100 },
+        "jobTitle": { "type": "string", "maxLength": 150 },
+        "employerEmail": { "type": "string", "maxLength": 128 },
+        "candidateEmail": { "type": "string", "maxLength": 128 },
+        "candidateName": { "type": "string", "maxLength": 100 },
+        "candidatePhoto": { "type": "string", "maxLength": 500000 },
+        "status": { "type": "string", "enum": ["Applied", "Under Review", "Interviewing", "Offered", "Rejected"] },
+        "appliedAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "jobId", "jobTitle", "employerEmail", "candidateEmail", "candidateName", "status", "appliedAt", "updatedAt"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Scheduled discovery call or consultation meeting",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "hostEmail": { "type": "string", "maxLength": 128 },
+        "hostName": { "type": "string", "maxLength": 100 },
+        "bookerEmail": { "type": "string", "maxLength": 128 },
+        "bookerName": { "type": "string", "maxLength": 100 },
+        "topic": { "type": "string", "maxLength": 200 },
+        "date": { "type": "string", "maxLength": 50 },
+        "timeSlot": { "type": "string", "maxLength": 50 },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "enum": ["Scheduled", "Completed", "Cancelled"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "hostEmail", "hostName", "bookerEmail", "bookerName", "topic", "date", "timeSlot", "status", "createdAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Direct chat message between professionals",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "threadKey": { "type": "string", "maxLength": 200 },
+        "from": { "type": "string", "maxLength": 128 },
+        "to": { "type": "string", "maxLength": 128 },
+        "text": { "type": "string", "maxLength": 4000 },
+        "time": { "type": "number" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "threadKey", "from", "to", "text", "time", "read"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "recipientEmail": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["msg", "job", "assign", "ann", "account"] },
+        "text": { "type": "string", "maxLength": 300 },
+        "sub": { "type": "string", "maxLength": 1000 },
+        "time": { "type": "number" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "recipientEmail", "type", "text", "time", "read"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of all user accounts and profiles"
+    },
+    "/jobs/{jobId}": {
+      "schema": "Job",
+      "description": "Job listings posted on the platform"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "Announcements and recruitment bulletins"
+    },
+    "/events/{eventId}": {
+      "schema": "ProfessionalEvent",
+      "description": "Professional networking events"
+    },
+    "/community_posts/{postId}": {
+      "schema": "CommunityPost",
+      "description": "Community feed articles and discussion posts"
+    },
+    "/applications/{applicationId}": {
+      "schema": "JobApplication",
+      "description": "Job applications submitted by candidates"
+    },
+    "/appointments/{appointmentId}": {
+      "schema": "Appointment",
+      "description": "Booked discovery calls and appointments"
+    },
+    "/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Direct messages between users"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User system notifications"
+    }
+  }
+}

@@ -1,0 +1,4905 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useMemo } from 'react';
+import { 
+  Briefcase, 
+  MessageSquare, 
+  Bell, 
+  UserCircle, 
+  LogOut, 
+  Search, 
+  Menu, 
+  X,
+  ChevronDown,
+  Check,
+  Sun,
+  Moon,
+  Plus,
+  Home as HomeIcon,
+  MapPin,
+  DollarSign,
+  Calendar,
+  CheckCircle,
+  Clock,
+  Trash2,
+  Send,
+  Star,
+  Users,
+  Building,
+  Settings,
+  Camera,
+  LayoutGrid,
+  ThumbsUp,
+  ExternalLink,
+  Award,
+  Globe,
+  CalendarDays,
+  ShieldCheck,
+  FileBadge,
+  Copyright,
+  ShieldAlert,
+  UserCheck,
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  Sparkles,
+  Shield,
+  Sliders,
+  UserX,
+  Maximize2,
+  BarChart2,
+  FileText,
+  XCircle,
+  Filter,
+  Cloud,
+  Database,
+  Video
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { useAppStorage } from './useAppStorage';
+import { User, Job, Announcement, Notification, UserRole, PortfolioItem, CommunityPost, ProfessionalEvent, Appointment, JobApplication } from './types';
+import { GoogleMeetHubModal } from './components/GoogleMeetHubModal';
+import { ScheduleInterviewModal } from './components/ScheduleInterviewModal';
+import { createGoogleMeetSpace } from './googleMeet';
+
+// --- Sub-components (Simplified for now, can be extracted later) ---
+
+const Badge = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
+  <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider ${className}`}>
+    {children}
+  </span>
+);
+
+const calcRating = (ratings: number[] = []) => {
+  if (ratings.length === 0) return 0;
+  return (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1);
+};
+
+export default function App() {
+  const {
+    currentUser,
+    users,
+    announcements,
+    jobs,
+    notifications,
+    messages,
+    communityPosts,
+    events,
+    applications,
+    isLoading,
+    isFirebaseConnected,
+    login,
+    loginWithGoogle,
+    logout,
+    updateCurrentUser,
+    addNotificationTo,
+    setAnnouncements,
+    setJobs,
+    addJob,
+    addAnnouncement,
+    addCommunityPost,
+    likePost,
+    addEvent,
+    joinEvent,
+    createJobApplication,
+    updateApplication,
+    updateApplicationStatus,
+    appointments,
+    bookAppointment,
+    cancelAppointment,
+    sendMessage,
+    markThreadAsRead,
+    markNotifsRead,
+    saveUser,
+    searchHistory,
+    saveJobSearch,
+    clearSearchHistory,
+    deleteUser,
+    toggleUserVerified,
+    toggleUserAdmin,
+    deleteJob,
+    deleteAnnouncement,
+    deleteCommunityPost,
+    deleteEvent,
+    broadcastNotification
+  } = useAppStorage();
+
+  const [activePage, setActivePage] = useState<'home' | 'jobs' | 'messages' | 'notifications' | 'card' | 'discover' | 'community' | 'events' | 'applications' | 'about' | 'admin'>('about');
+  const [activeConversation, setActiveConversation] = useState<string | null>(null);
+  const [messageInput, setMessageInput] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('oc_dark') === 'true');
+
+  // Admin Controls State
+  const [adminTab, setAdminTab] = useState<'verifications' | 'users' | 'jobs' | 'community' | 'broadcast'>('verifications');
+  const [adminSearchQuery, setAdminSearchQuery] = useState('');
+  const [adminRoleFilter, setAdminRoleFilter] = useState<'all' | 'Employee' | 'Employer' | 'BusinessOwner'>('all');
+  const [adminDocPreview, setAdminDocPreview] = useState<{ user: User } | null>(null);
+  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
+  const [broadcastTitle, setBroadcastTitle] = useState('');
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [declineReasonModal, setDeclineReasonModal] = useState<{ email: string; name: string } | null>(null);
+  const [declineReasonInput, setDeclineReasonInput] = useState('');
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [roleSelection, setRoleSelection] = useState<UserRole | null>(null);
+  
+  // Appointment / Meeting Booking State
+  const [bookingTarget, setBookingTarget] = useState<User | null>(null);
+  const [bookingTopic, setBookingTopic] = useState('15-min Discovery Call');
+  const [bookingDate, setBookingDate] = useState('');
+  const [bookingTimeSlot, setBookingTimeSlot] = useState('10:00 AM - 10:30 AM');
+  const [bookingNotes, setBookingNotes] = useState('');
+  const [bookingSuccess, setBookingSuccess] = useState<Appointment | null>(null);
+  const [bookingIncludeMeet, setBookingIncludeMeet] = useState(true);
+  const [isBookingLoading, setIsBookingLoading] = useState(false);
+  const [showMyBookingsModal, setShowMyBookingsModal] = useState(false);
+  
+  // Google Meet Hub & Scheduling State
+  const [showMeetHubModal, setShowMeetHubModal] = useState(false);
+  const [schedulingInterviewForApp, setSchedulingInterviewForApp] = useState<JobApplication | null>(null);
+  const [chatMeetConfirmModal, setChatMeetConfirmModal] = useState<{ targetEmail: string; targetName: string } | null>(null);
+  const [isCreatingChatMeet, setIsCreatingChatMeet] = useState(false);
+  const [eventIncludeMeet, setEventIncludeMeet] = useState(true);
+  const [isCreatingEvent, setIsCreatingEvent] = useState(false);
+  
+  // Profile Editing State
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editForm, setEditForm] = useState<Partial<User>>({});
+
+  // Portfolio Item State
+  const [newPortfolioItem, setNewPortfolioItem] = useState<Partial<PortfolioItem>>({ title: '', description: '', link: '' });
+  const [isAddingPortfolio, setIsAddingPortfolio] = useState(false);
+
+  // Community Feed State
+  const [postContent, setPostContent] = useState('');
+  const [postImage, setPostImage] = useState<string | null>(null);
+  const [isSubmittingPost, setIsSubmittingPost] = useState(false);
+  
+  // Event State
+  const [showAddEventModal, setShowAddEventModal] = useState(false);
+  const [eventForm, setEventForm] = useState<Partial<ProfessionalEvent>>({ type: 'Webinar', date: '', location: '', title: '', description: '' });
+
+  // Staff Management State
+  const [staffEmailInput, setStaffEmailInput] = useState('');
+  const [hierarchyView, setHierarchyView] = useState<'table' | 'chart'>('table');
+  const [assigningStaff, setAssigningStaff] = useState<{email: string, name: string} | null>(null);
+  
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [showJobModal, setShowJobModal] = useState(false);
+  const [showAnnModal, setShowAnnModal] = useState(false);
+  const [showProfileVerificationForm, setShowProfileVerificationForm] = useState(false);
+  const [viewingProfile, setViewingProfile] = useState<User | null>(null);
+
+  const isMainAdmin = currentUser?.email?.trim().toLowerCase() === 'adrielaturinda4@gmail.com';
+
+  const pendingVerificationsCount = useMemo(() => {
+    return (Object.values(users) as User[]).filter(u => u.verificationPending || (u.verificationDoc && !u.isVerified)).length;
+  }, [users]);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchType, setSearchType] = useState<'all' | 'people' | 'businesses' | 'jobs'>('all');
+  const [isSearchTypeOpen, setIsSearchTypeOpen] = useState(false);
+  const searchTypeRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchTypeRef.current && !searchTypeRef.current.contains(event.target as Node)) {
+        setIsSearchTypeOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Job Filter State
+  const [jobTypeFilter, setJobTypeFilter] = useState('all');
+  const [jobLocationFilter, setJobLocationFilter] = useState('');
+  
+  // Job Application State
+  const [applyingForJob, setApplyingForJob] = useState<Job | null>(null);
+  const [isApplying, setIsApplying] = useState(false);
+  const [attachResume, setAttachResume] = useState(true);
+
+  // Rating State
+  const [submittingRating, setSubmittingRating] = useState(false);
+
+  // Handle initial route and new user onboarding
+  React.useEffect(() => {
+    const path = window.location.pathname;
+    
+    if (path === '/about') {
+      setActivePage('about');
+    } else if (!currentUser) {
+      setActivePage('about');
+    } else if (currentUser && activePage === 'about') {
+      // If we are logged in and on landing, maybe stay or go home.
+      // For now, let's allow them to stay on about if they want, 
+      // but if it's the very first load and they are logged in, home is better.
+      const hasInitiallyRouted = localStorage.getItem('oc_routed');
+      if (!hasInitiallyRouted) {
+        setActivePage('home');
+        localStorage.setItem('oc_routed', 'true');
+      }
+    }
+  }, [currentUser]);
+
+  const toggleDarkMode = () => {
+    const newVal = !isDarkMode;
+    setIsDarkMode(newVal);
+    localStorage.setItem('oc_dark', String(newVal));
+  };
+
+  const handleAuth = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setAuthError('');
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail) {
+      setAuthError('Please enter an email address.');
+      return;
+    }
+
+    if (!password) {
+      setAuthError('Please enter your password.');
+      return;
+    }
+
+    if (authMode === 'login') {
+      const user = users[cleanEmail];
+      if (!user) {
+        setAuthError('No account found with this email. Switch to "Sign Up" to create one.');
+        return;
+      }
+      if (user.password && user.password !== password) {
+        setAuthError('Incorrect password. Please try again.');
+        return;
+      }
+      // Successful login
+      login(cleanEmail, user);
+      setEmail('');
+      setPassword('');
+      setConfirmPassword('');
+      setAuthError('');
+      setActivePage('home');
+    } else {
+      // Sign Up mode
+      if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+        setAuthError('Please enter a valid email address (e.g. user@example.com).');
+        return;
+      }
+      if (password.length < 4) {
+        setAuthError('Password must be at least 4 characters long.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setAuthError('Passwords do not match. Please verify your password.');
+        return;
+      }
+      if (users[cleanEmail]) {
+        setAuthError('An account with this email already exists. Please Sign In.');
+        return;
+      }
+
+      // Save initial user record
+      const newUser: User = { 
+        email: cleanEmail, 
+        password, 
+        isVerified: true 
+      };
+      saveUser(newUser);
+      localStorage.setItem('oc_temp_email', cleanEmail);
+      setAuthError('');
+      setShowRoleModal(true);
+    }
+  };
+
+  const startEditing = () => {
+    if (!currentUser) return;
+    setEditForm({
+      name: currentUser.name || '',
+      occupation: currentUser.occupation || '',
+      location: currentUser.location || '',
+      description: currentUser.description || '',
+      resumeContent: currentUser.resumeContent || '',
+      photo: currentUser.photo || currentUser.logo || '',
+      logo: currentUser.photo || currentUser.logo || '',
+      speciality: currentUser.speciality || '',
+      industry: currentUser.industry || '',
+      website: currentUser.website || '',
+      bizName: currentUser.bizName || ''
+    });
+    setIsEditingProfile(true);
+  };
+
+  const handleSaveProfile = () => {
+    updateCurrentUser(editForm);
+    setIsEditingProfile(false);
+    addNotificationTo(currentUser!.email, {
+      type: 'account',
+      text: 'Profile Updated',
+      sub: 'Your card details have been saved successfully.'
+    });
+  };
+
+  const handleRateUser = (targetEmail: string, rating: number) => {
+    if (!currentUser) return;
+    const targetUser = users[targetEmail];
+    if (!targetUser) return;
+
+    const currentRatings = targetUser.ratings || [];
+    const currentVoters = targetUser.ratingVoters || {};
+    
+    // Check if user already rated
+    if (currentVoters[currentUser.email]) {
+      alert("You've already rated this profile.");
+      return;
+    }
+
+    const newRatings = [...currentRatings, rating];
+    const newVoters = { ...currentVoters, [currentUser.email]: rating };
+    
+    const updatedUser = { 
+      ...targetUser, 
+      ratings: newRatings, 
+      ratingVoters: newVoters 
+    };
+
+    saveUser(updatedUser);
+    setViewingProfile(updatedUser); // Update the view modal immediately
+    
+    addNotificationTo(targetEmail, {
+      type: 'account',
+      text: 'New Rating!',
+      sub: `${currentUser.bizName || currentUser.name} gave you ${rating} stars!`
+    });
+  };
+
+  const handleEndorse = (targetEmail: string, skill: string) => {
+    if (!currentUser) return;
+    const targetUser = users[targetEmail];
+    if (!targetUser) return;
+
+    const currentEndorsements = targetUser.skillEndorsements || {};
+    const skillList = currentEndorsements[skill] || [];
+
+    if (skillList.includes(currentUser.email)) {
+      // Toggle off (un-endorse)
+      currentEndorsements[skill] = skillList.filter(e => e !== currentUser.email);
+    } else {
+      // Endorse
+      currentEndorsements[skill] = [...skillList, currentUser.email];
+      
+      addNotificationTo(targetEmail, {
+        type: 'account',
+        text: 'Skill Endorsed!',
+        sub: `${currentUser.bizName || currentUser.name} endorsed you for ${skill}!`
+      });
+    }
+
+    const updatedUser = { ...targetUser, skillEndorsements: currentEndorsements };
+    saveUser(updatedUser);
+    setViewingProfile(updatedUser);
+  };
+
+  const [isVerifyingAI, setIsVerifyingAI] = useState(false);
+  const [verificationFeedback, setVerificationFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const requestVerification = async (doc: string, type: string) => {
+    if (!currentUser) return;
+    
+    setIsVerifyingAI(true);
+    setVerificationFeedback(null);
+    updateCurrentUser({ 
+      verificationPending: true,
+      verificationDoc: doc,
+      verificationType: type
+    });
+
+    try {
+      const response = await fetch('/api/verify-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ docBase64: doc, docType: type })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Verification server error');
+      }
+      
+      const result = await response.json();
+      
+      if (result.verified && (result.confidence === undefined || result.confidence > 0.5)) {
+        updateCurrentUser({ 
+          isVerified: true, 
+          verificationPending: false,
+          verificationReason: result.reason || 'Verified by AI'
+        });
+        addNotificationTo(currentUser.email, {
+          type: 'account',
+          text: 'Profile Verified!',
+          sub: result.reason || 'AI has successfully verified your professional document.'
+        });
+        setVerificationFeedback({
+          type: 'success',
+          message: result.reason || 'Document successfully verified! Your profile now has the Verified Member badge.'
+        });
+        setTimeout(() => {
+          setShowProfileVerificationForm(false);
+          setVerificationFeedback(null);
+        }, 2200);
+      } else {
+        updateCurrentUser({ 
+          isVerified: false, 
+          verificationPending: false,
+          verificationReason: result.reason || 'Verification could not be confirmed'
+        });
+        addNotificationTo(currentUser.email, {
+          type: 'account',
+          text: 'Verification Declined',
+          sub: result.reason || 'The provided document could not be verified by our AI.'
+        });
+        setVerificationFeedback({
+          type: 'error',
+          message: result.reason || 'Could not verify document authenticity. Please upload a clear photo of a valid National ID or Passport.'
+        });
+      }
+    } catch (error: any) {
+      console.error('Verification error:', error);
+      updateCurrentUser({ 
+        verificationPending: false 
+      });
+      setVerificationFeedback({
+        type: 'error',
+        message: error.message || "AI Verification service error. Please ensure the document image is clear."
+      });
+    } finally {
+      setIsVerifyingAI(false);
+    }
+  };
+
+  const selectRole = (role: UserRole) => {
+    setRoleSelection(role);
+    setShowRoleModal(false);
+    setShowSetupModal(true);
+  };
+
+  const finalizeSetup = (data: any) => {
+    const tempEmail = localStorage.getItem('oc_temp_email')?.trim().toLowerCase();
+    if (!tempEmail) return;
+    
+    const existing = users[tempEmail] || {};
+    const newUser: User = {
+      ...existing,
+      email: tempEmail,
+      role: roleSelection!,
+      ...data,
+      views: existing.views || 0,
+      openToWork: true,
+      isVerified: true
+    };
+    
+    saveUser(newUser);
+    login(tempEmail, newUser);
+    setShowSetupModal(false);
+    localStorage.removeItem('oc_temp_email');
+    setActivePage('home');
+  };
+
+  const addStaffMember = () => {
+    if (!currentUser || !staffEmailInput) return;
+    const email = staffEmailInput.trim().toLowerCase();
+    const emp = users[email];
+    
+    if (!emp) {
+      alert('No account found with that email.');
+      return;
+    }
+    if (emp.role !== 'Employee') {
+      alert('That account is not an Employee.');
+      return;
+    }
+    
+    const existingStaff = currentUser.staff || [];
+    if (existingStaff.find(s => s.email === email)) {
+      alert('Already in your staff list.');
+      return;
+    }
+
+    const newStaff = [...existingStaff, { email, name: emp.name || email, post: '' }];
+    updateCurrentUser({ staff: newStaff });
+    setStaffEmailInput('');
+    
+    // Notify employee
+    addNotificationTo(email, {
+      type: 'assign',
+      text: `You've been added to ${currentUser.bizName || 'a business'} staff`,
+      sub: currentUser.bizName || 'Company Update'
+    });
+  };
+
+  const updateStaffPost = (email: string, post: string) => {
+    if (!currentUser) return;
+    const newStaff = (currentUser.staff || []).map(s => 
+      s.email === email ? { ...s, post } : s
+    );
+    updateCurrentUser({ staff: newStaff });
+    
+    // Update the employee's own card record
+    const emp = users[email];
+    if (emp) {
+      saveUser({ ...emp, assignedPost: post, assignedBiz: currentUser.bizName || currentUser.email });
+    }
+
+    addNotificationTo(email, {
+      type: 'assign',
+      text: `You've been assigned the post: ${post}`,
+      sub: currentUser.bizName || 'Company Update'
+    });
+    setAssigningStaff(null);
+  };
+
+  const removeStaffMember = (email: string) => {
+    if (!currentUser) return;
+    if (!confirm('Are you sure you want to remove this employee?')) return;
+    const newStaff = (currentUser.staff || []).filter(s => s.email !== email);
+    updateCurrentUser({ staff: newStaff });
+    
+    const emp = users[email];
+    if (emp) {
+      saveUser({ ...emp, assignedPost: '', assignedBiz: '' });
+    }
+  };
+
+  const usersList = useMemo(() => Object.values(users) as User[], [users]);
+
+  const filteredDirectory = useMemo(() => {
+    return usersList.filter(u => {
+      if (searchType === 'people' && u.role === 'BusinessOwner') return false;
+      if (searchType === 'businesses' && u.role !== 'BusinessOwner') return false;
+      return true;
+    });
+  }, [usersList, searchType]);
+
+  const searchResults = useMemo(() => {
+    if (!searchQuery) return [];
+    const query = searchQuery.toLowerCase();
+    let results: any[] = [];
+
+    if (searchType === 'all' || searchType === 'people') {
+      const people = usersList.filter(u => 
+        (u.role === 'Employee' || u.role === 'Employer') &&
+        [u.name, u.occupation, u.speciality, u.location].some(v => v?.toLowerCase().includes(query))
+      ).map(u => ({ ...u, type: 'person' }));
+      results = [...results, ...people];
+    }
+
+    if (searchType === 'all' || searchType === 'businesses') {
+      const businesses = usersList.filter(u => 
+        u.role === 'BusinessOwner' &&
+        [u.bizName, u.speciality, u.location].some(v => v?.toLowerCase().includes(query))
+      ).map(u => ({ ...u, type: 'business' }));
+      results = [...results, ...businesses];
+    }
+
+    if (searchType === 'all' || searchType === 'jobs') {
+      const jobResults = jobs.filter(j => 
+        [j.title, j.desc, j.location, j.posterName].some(v => v?.toLowerCase().includes(query))
+      ).map(j => ({ ...j, type: 'job' }));
+      results = [...results, ...jobResults];
+    }
+
+    return results.slice(0, 10);
+  }, [searchQuery, searchType, usersList, jobs]);
+
+  const filteredJobs = useMemo(() => {
+    return jobs.filter(job => {
+      const matchesType = jobTypeFilter === 'all' || job.type === jobTypeFilter;
+      const matchesLocation = !jobLocationFilter || job.location?.toLowerCase().includes(jobLocationFilter.toLowerCase());
+      return matchesType && matchesLocation;
+    });
+  }, [jobs, jobTypeFilter, jobLocationFilter]);
+
+  if (isLoading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
+
+  if (!currentUser && activePage !== 'about') {
+    return (
+      <div className={`min-h-screen flex flex-col justify-between p-4 relative ${isDarkMode ? 'dark bg-oc-navy-mid text-gray-100' : 'bg-oc-cream text-oc-navy-mid'}`}>
+        {/* Top Header Controls */}
+        <div className="max-w-md w-full mx-auto flex items-center justify-between pt-4">
+          <div className="flex items-center gap-2">
+            <Building className="text-oc-gold w-6 h-6" />
+            <span className="font-serif font-bold text-lg text-oc-navy dark:text-oc-gold">Online Corporate</span>
+          </div>
+          <button 
+            type="button"
+            onClick={toggleDarkMode} 
+            className="p-2 rounded-xl bg-white/50 dark:bg-white/10 hover:bg-oc-gold/20 transition-all text-sm flex items-center gap-1.5"
+            title="Toggle theme"
+          >
+            {isDarkMode ? <Sun size={16} className="text-oc-gold" /> : <Moon size={16} className="text-oc-navy" />}
+          </button>
+        </div>
+
+        {/* Main Card Container */}
+        <div className="my-auto py-8">
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }} 
+            animate={{ opacity: 1, y: 0 }} 
+            className="bg-white dark:bg-oc-navy p-8 rounded-3xl shadow-2xl w-full max-w-md mx-auto border border-oc-gold/15 relative overflow-hidden"
+          >
+            <div className="text-center mb-6">
+              <div className="w-12 h-12 bg-oc-gold/10 rounded-2xl flex items-center justify-center mx-auto mb-3 text-oc-gold">
+                <Building size={24} />
+              </div>
+              <h1 className="text-2xl font-serif font-bold text-oc-navy dark:text-oc-gold-light mb-1">
+                {authMode === 'login' ? 'Welcome Back' : 'Join Online Corporate'}
+              </h1>
+              <p className="text-xs text-oc-navy-mid/60 dark:text-gray-400">
+                {authMode === 'login' 
+                  ? 'Access your corporate network & opportunities' 
+                  : 'Connect with businesses, employers & top professionals'}
+              </p>
+            </div>
+            
+            {/* Tab Switcher */}
+            <div className="flex bg-oc-cream dark:bg-white/5 p-1 rounded-2xl mb-6 border border-oc-gold/10">
+              <button 
+                type="button"
+                className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all ${
+                  authMode === 'login' 
+                    ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy shadow-md' 
+                    : 'text-gray-500 dark:text-gray-400 hover:text-oc-navy dark:hover:text-white'
+                }`}
+                onClick={() => { setAuthMode('login'); setAuthError(''); }}
+              >
+                Sign In
+              </button>
+              <button 
+                type="button"
+                className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all ${
+                  authMode === 'signup' 
+                    ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy shadow-md' 
+                    : 'text-gray-500 dark:text-gray-400 hover:text-oc-navy dark:hover:text-white'
+                }`}
+                onClick={() => { setAuthMode('signup'); setAuthError(''); }}
+              >
+                Sign Up
+              </button>
+            </div>
+
+            {/* Error Message Alert */}
+            {authError && (
+              <motion.div 
+                initial={{ opacity: 0, y: -5 }} 
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs flex items-center gap-2"
+              >
+                <AlertCircle size={16} className="flex-shrink-0" />
+                <span>{authError}</span>
+              </motion.div>
+            )}
+
+            {/* Auth Form */}
+            <form onSubmit={handleAuth} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3.5 top-3.5 text-gray-400 w-4 h-4" />
+                  <input 
+                    type="email" 
+                    required
+                    placeholder="e.g. user@example.com" 
+                    className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl pl-10 pr-4 py-3 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none transition-all"
+                    value={email}
+                    onChange={e => { setEmail(e.target.value); setAuthError(''); }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                  Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3.5 top-3.5 text-gray-400 w-4 h-4" />
+                  <input 
+                    type={showPassword ? "text" : "password"}
+                    required
+                    placeholder="Enter your password" 
+                    className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl pl-10 pr-10 py-3 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none transition-all"
+                    value={password}
+                    onChange={e => { setPassword(e.target.value); setAuthError(''); }}
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {authMode === 'signup' && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                    Confirm Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3.5 top-3.5 text-gray-400 w-4 h-4" />
+                    <input 
+                      type={showPassword ? "text" : "password"}
+                      required
+                      placeholder="Re-enter password" 
+                      className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl pl-10 pr-10 py-3 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none transition-all"
+                      value={confirmPassword}
+                      onChange={e => { setConfirmPassword(e.target.value); setAuthError(''); }}
+                    />
+                  </div>
+                </motion.div>
+              )}
+
+              <button 
+                type="submit"
+                className="w-full bg-oc-navy hover:bg-oc-navy-mid text-oc-gold font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-oc-navy/20 flex items-center justify-center gap-2 mt-2"
+              >
+                <span>{authMode === 'login' ? 'Sign In' : 'Continue to Role Selection'}</span>
+              </button>
+
+              <div className="relative flex items-center justify-center my-3">
+                <div className="border-t border-oc-gold/15 w-full"></div>
+                <span className="bg-white dark:bg-oc-navy px-3 text-[11px] uppercase tracking-wider text-gray-400 font-semibold shrink-0">
+                  Or continue with
+                </span>
+                <div className="border-t border-oc-gold/15 w-full"></div>
+              </div>
+
+              <button
+                type="button"
+                disabled={isGoogleLoading}
+                onClick={async () => {
+                  setIsGoogleLoading(true);
+                  setAuthError('');
+                  try {
+                    const res = await loginWithGoogle();
+                    if (res && res.success && res.user) {
+                      setActivePage('home');
+                    } else if (res && !res.success && res.error) {
+                      setAuthError(res.error);
+                    }
+                  } catch (err: any) {
+                    setAuthError(err?.message || 'Failed to sign in with Google');
+                  } finally {
+                    setIsGoogleLoading(false);
+                  }
+                }}
+                className="w-full bg-oc-cream/80 dark:bg-white/5 hover:bg-oc-gold/10 border border-oc-gold/20 text-oc-navy dark:text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-3 text-xs shadow-sm hover:border-oc-gold disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isGoogleLoading ? (
+                  <div className="w-4 h-4 border-2 border-oc-gold border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                    <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z" />
+                    <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.6h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.9z" />
+                    <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.8s.1-2.1.4-2.8L1.9 6.3C.7 8.7 0 10.3 0 12s.7 3.3 1.9 5.7l3.7-2.9z" />
+                    <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.4-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z" />
+                  </svg>
+                )}
+                <span>{isGoogleLoading ? 'Connecting to Google...' : 'Continue with Google'}</span>
+              </button>
+
+              {authMode === 'login' && (
+                <div className="pt-2 text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('adrielaturinda4@gmail.com');
+                      setPassword('adrielissocool1');
+                      setAuthError('');
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-oc-gold/10 hover:bg-oc-gold/20 text-oc-gold font-bold text-[11px] border border-oc-gold/20 transition-all"
+                  >
+                    <Shield size={12} /> Fill Admin Credentials (adrielaturinda4@gmail.com)
+                  </button>
+                </div>
+              )}
+
+              {/* Cloud Sync Status */}
+              <div className="pt-2 flex items-center justify-center gap-1.5 text-[10px] text-gray-400">
+                <Cloud size={12} className={isFirebaseConnected ? "text-green-500" : "text-amber-500"} />
+                <span>
+                  {isFirebaseConnected ? "Connected to Cloud Firestore" : "Local Sync Mode Active"}
+                </span>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+
+        {/* Footer info */}
+        <div className="text-center text-[11px] text-gray-500 py-2">
+          &copy; 2026 Online Corporate • Professional Business Directory & Network
+        </div>
+
+        {/* Role Selector Modal Overlay if in setup */}
+        <AnimatePresence>
+          {showRoleModal && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white dark:bg-oc-navy p-8 rounded-3xl w-full max-w-sm shadow-2xl border border-oc-gold/20 text-center">
+                <h2 className="text-2xl font-serif font-bold text-oc-navy dark:text-oc-gold-light mb-2">Choose Your Role</h2>
+                <p className="text-xs text-gray-400 mb-6">Select how you want to interact with Online Corporate</p>
+                <div className="space-y-3">
+                  {[
+                    { id: 'Employee', label: 'Employee / Job Seeker', emoji: '👷', desc: 'Find work, apply to jobs & post services' },
+                    { id: 'Employer', label: 'Employer / HR Manager', emoji: '💼', desc: 'Post job vacancies & recruit talent' },
+                    { id: 'BusinessOwner', label: 'Business Owner', emoji: '🏢', desc: 'Register company profile & manage staff' },
+                  ].map(r => (
+                    <button 
+                      key={r.id}
+                      type="button"
+                      onClick={() => selectRole(r.id as UserRole)}
+                      className="w-full flex items-center gap-3 bg-oc-cream dark:bg-white/5 p-4 rounded-2xl hover:bg-oc-gold hover:text-oc-navy transition-all text-left border border-oc-gold/10 group"
+                    >
+                      <span className="text-2xl">{r.emoji}</span>
+                      <div>
+                        <div className="font-bold text-sm">{r.label}</div>
+                        <div className="text-[10px] text-gray-400 group-hover:text-oc-navy/80">{r.desc}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Profile Setup Modal Overlay */}
+        <AnimatePresence>
+          {showSetupModal && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/20 max-h-[90vh] overflow-y-auto"
+              >
+                <h2 className="text-2xl font-serif font-bold text-oc-navy dark:text-oc-gold-light mb-2">Setup Your Profile</h2>
+                <p className="text-xs text-gray-400 mb-6">Tell the network a bit about yourself</p>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const fd = new FormData(e.currentTarget);
+                  const data = Object.fromEntries(fd.entries());
+                  finalizeSetup(data);
+                }} className="space-y-4">
+                  <input required name={roleSelection === 'BusinessOwner' ? 'bizName' : 'name'} placeholder={roleSelection === 'BusinessOwner' ? 'Business Name' : 'Full Name'} className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl p-3.5 text-sm outline-none focus:border-oc-gold" />
+                  <input name="location" placeholder="Location (e.g. Kampala, Uganda)" className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl p-3.5 text-sm outline-none focus:border-oc-gold" />
+                  <input name={roleSelection === 'BusinessOwner' ? 'speciality' : 'occupation'} placeholder={roleSelection === 'BusinessOwner' ? 'Business Industry / Category' : 'Current Occupation / Title'} className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl p-3.5 text-sm outline-none focus:border-oc-gold" />
+                  {roleSelection === 'BusinessOwner' && (
+                    <>
+                      <input name="industry" placeholder="Industry (e.g. Finance, Tech, Retail)" className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl p-3.5 text-sm outline-none focus:border-oc-gold" />
+                      <input name="website" type="url" placeholder="Website URL (https://...)" className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl p-3.5 text-sm outline-none focus:border-oc-gold" />
+                    </>
+                  )}
+                  <textarea name="description" placeholder="Short bio or business description" className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl p-3.5 text-sm outline-none h-24 focus:border-oc-gold" />
+                  <button type="submit" className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-3.5 rounded-xl shadow-lg mt-4 hover:opacity-90 transition-all">
+                    Complete Setup & Launch Dashboard
+                  </button>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex min-h-screen ${isDarkMode ? 'dark bg-oc-navy-mid text-gray-100' : 'bg-oc-cream text-oc-navy-mid'}`}>
+      {/* Sidebar Overlay */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 z-40 lg:hidden"
+            onClick={() => setIsSidebarOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Sidebar */}
+      <aside className={`
+        fixed lg:sticky top-0 left-0 h-screen w-64 bg-oc-navy text-white z-50 transform transition-transform duration-300
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        flex flex-col border-r border-oc-gold/10
+      `}>
+        <div className="p-6 border-b border-oc-gold/10">
+          <div className="text-xl font-serif font-bold text-oc-gold-light tracking-tight">Online Corporate</div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 mt-1">Professional Network</div>
+          <div className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-oc-gold/10 border border-oc-gold/20 text-[9px] font-semibold text-oc-gold">
+            <span className={`w-1.5 h-1.5 rounded-full ${isFirebaseConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+            <span>{isFirebaseConnected ? 'Cloud Sync Online' : 'Local Cache Active'}</span>
+          </div>
+        </div>
+        
+        <nav className="flex-1 overflow-y-auto pt-6 px-4 space-y-1">
+          {[
+            { id: 'home', label: 'Home', icon: HomeIcon },
+            { id: 'jobs', label: 'Jobs', icon: Briefcase },
+            { id: 'applications', label: 'Applications', icon: CheckCircle, badge: (currentUser?.role === 'Employer' || currentUser?.role === 'BusinessOwner') ? applications.filter(a => a.employerEmail === currentUser.email && a.status === 'Applied').length : 0 },
+            { id: 'community', label: 'Community', icon: Globe },
+            { id: 'events', label: 'Events', icon: CalendarDays },
+            { id: 'messages', label: 'Messages', icon: MessageSquare, badge: Object.values(messages).flat().filter((m: any) => m.from !== currentUser?.email && !m.read).length },
+            { id: 'notifications', label: 'Notifications', icon: Bell, badge: notifications.filter(n => !n.read).length },
+            { id: 'card', label: 'My Card', icon: UserCircle },
+            ...(isMainAdmin ? [{ id: 'admin', label: 'Admin Controls', icon: Shield, badge: pendingVerificationsCount }] : []),
+          ].map(item => (
+            <button
+              key={item.id}
+              onClick={() => { setActivePage(item.id); setIsSidebarOpen(false); }}
+              className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all text-sm group ${
+                activePage === item.id 
+                  ? 'bg-oc-gold/10 text-oc-gold-light border-l-2 border-oc-gold' 
+                  : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <item.icon size={18} className={`${activePage === item.id ? 'text-oc-gold' : 'text-gray-500 group-hover:text-gray-300'}`} />
+              <span className="font-medium">{item.label}</span>
+              {item.badge ? (
+                <span className="ml-auto bg-red-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white min-w-[1.2rem] text-center">
+                  {item.badge}
+                </span>
+              ) : (
+                <div className={`ml-auto w-1.5 h-1.5 rounded-full ${activePage === item.id ? 'bg-oc-gold' : 'bg-transparent'}`} />
+              )}
+            </button>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => { setShowMeetHubModal(true); setIsSidebarOpen(false); }}
+            className="w-full mt-2 flex items-center gap-3 px-4 py-3 rounded-2xl bg-gradient-to-r from-blue-600/20 to-emerald-600/20 hover:from-blue-600/30 hover:to-emerald-600/30 border border-emerald-500/30 text-emerald-400 font-bold text-xs transition-all shadow-sm group"
+          >
+            <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-blue-600 to-emerald-500 flex items-center justify-center text-white shrink-0 shadow-md">
+              <Video size={14} />
+            </div>
+            <div className="text-left min-w-0">
+              <div className="text-white text-xs font-bold truncate">Google Meet</div>
+              <div className="text-[9px] text-emerald-400/80 font-normal">Video &amp; Conferences</div>
+            </div>
+          </button>
+        </nav>
+
+        <div className="p-4 border-t border-oc-gold/10 space-y-1">
+          <button 
+            onClick={() => { setActivePage('about'); setIsSidebarOpen(false); }}
+            className={`flex items-center gap-4 w-full px-4 py-3 text-sm transition-colors rounded-xl ${
+              activePage === 'about' 
+                ? 'bg-oc-gold/10 text-oc-gold border-l-2 border-oc-gold' 
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <LayoutGrid size={18} />
+            <span>Mission & Vision</span>
+          </button>
+          {currentUser ? (
+            <button 
+              onClick={logout}
+              className="flex items-center gap-4 w-full px-4 py-3 text-sm text-gray-400 hover:text-red-400 transition-colors"
+            >
+              <LogOut size={18} />
+              <span>Sign Out</span>
+            </button>
+          ) : (
+            <button 
+              onClick={() => setActivePage('home')}
+              className="flex items-center gap-4 w-full px-4 py-3 text-sm text-oc-gold hover:text-white transition-colors"
+            >
+              <Users size={18} />
+              <span>Sign In / Join</span>
+            </button>
+          )}
+          <div className="mt-4 px-4 text-[10px] text-gray-500 dark:text-gray-300 uppercase tracking-widest text-center font-medium">
+            &copy; 2026 Online Corporate • Aturinda Adriel, Atwakiire Borice &amp; Abenaitwe Linus
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="h-16 flex items-center px-6 bg-white dark:bg-oc-navy border-b border-oc-gold/5 sticky top-0 z-30">
+          <button className="lg:hidden p-2 -ml-2 text-oc-navy dark:text-oc-gold/80" onClick={() => setIsSidebarOpen(true)}>
+            <Menu size={24} />
+          </button>
+          
+          <h2 className="text-lg font-serif font-bold text-oc-navy dark:text-oc-gold-light hidden sm:block ml-4 lg:ml-0">
+            {activePage.charAt(0).toUpperCase() + activePage.slice(1)}
+          </h2>
+
+          <div className="ml-auto flex items-center gap-2 sm:gap-3">
+            {currentUser && (
+              <>
+                {isMainAdmin && (
+                  <button 
+                    onClick={() => setActivePage('admin')}
+                    className={`relative px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 font-bold text-xs border ${
+                      activePage === 'admin' 
+                        ? 'bg-oc-gold text-oc-navy border-oc-gold shadow-md font-extrabold' 
+                        : 'bg-oc-gold/10 hover:bg-oc-gold/20 text-oc-navy dark:text-oc-gold border-oc-gold/20'
+                    }`}
+                    title="Admin Controls"
+                  >
+                    <Shield size={15} className="text-oc-gold shrink-0" />
+                    <span className="hidden sm:inline">Admin Controls</span>
+                    {pendingVerificationsCount > 0 && (
+                      <span className="bg-red-500 text-white font-black text-[9px] px-1.5 py-0.2 rounded-full animate-pulse">
+                        {pendingVerificationsCount}
+                      </span>
+                    )}
+                  </button>
+                )}
+
+                <button 
+                  onClick={() => setShowMeetHubModal(true)}
+                  className="relative px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600/10 to-emerald-600/10 hover:from-blue-600/20 hover:to-emerald-600/20 text-blue-600 dark:text-emerald-400 transition-all flex items-center gap-1.5 font-bold text-xs border border-emerald-500/30 shadow-sm"
+                  title="Google Meet Hub & Video Calls"
+                >
+                  <Video size={15} className="text-emerald-500" />
+                  <span className="hidden sm:inline">Google Meet</span>
+                </button>
+
+                <button 
+                  onClick={() => setShowMyBookingsModal(true)}
+                  className="relative px-3 py-1.5 rounded-xl bg-oc-gold/10 hover:bg-oc-gold/20 text-oc-navy dark:text-oc-gold transition-all flex items-center gap-1.5 font-bold text-xs border border-oc-gold/20"
+                  title="My Booked Discovery Calls & Meetings"
+                >
+                  <CalendarDays size={16} className="text-oc-gold" />
+                  <span className="hidden sm:inline">Bookings</span>
+                  {appointments.filter(a => (a.hostEmail === currentUser.email || a.bookerEmail === currentUser.email) && a.status === 'Scheduled').length > 0 && (
+                    <span className="bg-oc-gold text-oc-navy font-black text-[9px] px-1.5 py-0.2 rounded-full">
+                      {appointments.filter(a => (a.hostEmail === currentUser.email || a.bookerEmail === currentUser.email) && a.status === 'Scheduled').length}
+                    </span>
+                  )}
+                </button>
+              </>
+            )}
+            <button 
+              onClick={toggleDarkMode}
+              className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-white/5 text-gray-500 transition-colors"
+            >
+              {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
+            <div className="h-8 w-px bg-oc-gold/10 mx-2" />
+            <div className="text-right hidden xs:block">
+              <div className="text-sm font-semibold text-oc-navy dark:text-white">
+                {currentUser?.bizName || currentUser?.name || currentUser?.email}
+              </div>
+              <div className="text-[10px] text-oc-gold font-medium uppercase tracking-wider">
+                {currentUser?.role}
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 p-6 max-w-6xl mx-auto w-full">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activePage}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              {activePage === 'about' && (
+                <div className="max-w-4xl mx-auto space-y-12 py-10">
+                  <div className="text-center space-y-4">
+                    <motion.div 
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="w-20 h-20 bg-oc-gold/20 rounded-3xl mx-auto flex items-center justify-center text-oc-gold mb-6"
+                    >
+                      <Globe size={40} />
+                    </motion.div>
+                    <h2 className="text-4xl md:text-5xl font-serif font-bold text-oc-navy dark:text-oc-gold-light tracking-tight">
+                      Empowering the Professional Landscape
+                    </h2>
+                    <p className="text-xl text-gray-600 dark:text-gray-200 max-w-2xl mx-auto font-medium">
+                      Online Corporate is the definitive digital ecosystem designed to unify the workspace of tomorrow.
+                    </p>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-8">
+                    <div className="bg-white dark:bg-oc-navy p-10 rounded-[2.5rem] border border-oc-gold/10 shadow-sm space-y-6">
+                      <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 dark:text-blue-400">
+                        <Award size={24} />
+                      </div>
+                      <h3 className="text-2xl font-serif font-bold text-oc-navy dark:text-white">Our Mission</h3>
+                      <p className="text-gray-600 dark:text-gray-200 leading-relaxed font-normal">
+                        To bridge the gap between talent and corporate excellence through a seamless, AI-verified professional ecosystem. We provide the tools for businesses to discover growth and for individuals to build undeniable legacies.
+                      </p>
+                    </div>
+
+                    <div className="bg-white dark:bg-oc-navy p-10 rounded-[2.5rem] border border-oc-gold/10 shadow-sm space-y-6">
+                      <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-2xl flex items-center justify-center text-purple-600 dark:text-purple-400">
+                        <ShieldCheck size={24} />
+                      </div>
+                      <h3 className="text-2xl font-serif font-bold text-oc-navy dark:text-white">Our Vision</h3>
+                      <p className="text-gray-600 dark:text-gray-200 leading-relaxed font-normal">
+                        To be the global standard for professional identification and corporate networking. We envision a world where trust is algorithmic, opportunities are meritocratic, and every professional interaction creates measurable value.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Creators Section */}
+                  <div className="bg-white dark:bg-oc-navy p-8 md:p-10 rounded-[2.5rem] border border-oc-gold/20 shadow-sm space-y-6">
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-oc-gold/10 pb-6">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 text-oc-gold font-bold text-xs uppercase tracking-widest">
+                          <UserCheck size={16} />
+                          <span>Leadership & Architecture</span>
+                        </div>
+                        <h3 className="text-2xl font-serif font-bold text-oc-navy dark:text-white">
+                          Platform Creators &amp; Visionaries
+                        </h3>
+                      </div>
+                      <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-oc-gold/10 text-oc-gold border border-oc-gold/20 uppercase tracking-wider">
+                        Founding Creators
+                      </span>
+                    </div>
+
+                    <p className="text-gray-600 dark:text-gray-200 leading-relaxed font-medium">
+                      Online Corporate was conceptualized, designed, and developed by three lead innovators—<strong className="text-oc-navy dark:text-oc-gold-light">Aturinda Adriel</strong>, <strong className="text-oc-navy dark:text-oc-gold-light">Atwakiire Borice</strong>, and <strong className="text-oc-navy dark:text-oc-gold-light">Abenaitwe Linus</strong>—to pioneer an all-in-one digital workspace for career growth, business networking, and verified professional identification.
+                    </p>
+
+                    <div className="grid sm:grid-cols-3 gap-6 pt-2">
+                      <div className="p-6 rounded-2xl bg-oc-cream/60 dark:bg-oc-navy-mid border border-oc-gold/20 flex flex-col items-center text-center gap-3 hover:border-oc-gold/50 transition-all">
+                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-oc-gold to-amber-300 text-oc-navy font-serif font-black text-2xl flex items-center justify-center shadow-md shrink-0">
+                          AA
+                        </div>
+                        <div>
+                          <h4 className="text-lg font-bold text-oc-navy dark:text-white">Aturinda Adriel</h4>
+                          <p className="text-xs font-semibold text-oc-gold uppercase tracking-wider mt-1">Co-Creator &amp; Product Architect</p>
+                          <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">Platform Strategy &amp; Product Operations</p>
+                        </div>
+                      </div>
+
+                      <div className="p-6 rounded-2xl bg-oc-cream/60 dark:bg-oc-navy-mid border border-oc-gold/20 flex flex-col items-center text-center gap-3 hover:border-oc-gold/50 transition-all">
+                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-oc-gold to-amber-300 text-oc-navy font-serif font-black text-2xl flex items-center justify-center shadow-md shrink-0">
+                          AB
+                        </div>
+                        <div>
+                          <h4 className="text-lg font-bold text-oc-navy dark:text-white">Atwakiire Borice</h4>
+                          <p className="text-xs font-semibold text-oc-gold uppercase tracking-wider mt-1">Co-Creator &amp; System Strategist</p>
+                          <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">System Design &amp; Business Architecture</p>
+                        </div>
+                      </div>
+
+                      <div className="p-6 rounded-2xl bg-oc-cream/60 dark:bg-oc-navy-mid border border-oc-gold/20 flex flex-col items-center text-center gap-3 hover:border-oc-gold/50 transition-all">
+                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-oc-gold to-amber-300 text-oc-navy font-serif font-black text-2xl flex items-center justify-center shadow-md shrink-0">
+                          AL
+                        </div>
+                        <div>
+                          <h4 className="text-lg font-bold text-oc-navy dark:text-white">Abenaitwe Linus</h4>
+                          <p className="text-xs font-semibold text-oc-gold uppercase tracking-wider mt-1">Co-Creator &amp; Lead Engineer</p>
+                          <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">Core Software &amp; Ecosystem Development</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Copyright & Intellectual Property Protection Notice */}
+                  <div className="bg-gradient-to-br from-oc-navy-mid via-oc-navy to-black p-8 md:p-10 rounded-[2.5rem] border-2 border-oc-gold/30 shadow-2xl text-white space-y-6 relative overflow-hidden">
+                    <div className="absolute -right-8 -bottom-8 opacity-5 text-oc-gold pointer-events-none">
+                      <ShieldAlert size={220} />
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/10 pb-6 relative z-10">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-oc-gold/20 flex items-center justify-center text-oc-gold border border-oc-gold/30 shrink-0">
+                          <Copyright size={22} />
+                        </div>
+                        <div>
+                          <h3 className="text-xl font-serif font-bold text-oc-gold-light">
+                            Copyright &amp; Intellectual Property Notice
+                          </h3>
+                          <p className="text-xs text-gray-300 font-mono">
+                            OFFICIAL LEGAL PROTECTION STATEMENT
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-red-500/20 text-red-300 border border-red-500/30">
+                        All Rights Reserved
+                      </span>
+                    </div>
+
+                    <div className="space-y-4 text-sm text-gray-200 leading-relaxed relative z-10">
+                      <p className="text-base font-semibold text-white">
+                        &copy; 2026 Online Corporate. All Rights Reserved. Created by Aturinda Adriel, Atwakiire Borice, and Abenaitwe Linus.
+                      </p>
+                      <p>
+                        All software architecture, source code, visual design, user interfaces, branding assets, graphic design, algorithms, and database systems of <strong className="text-oc-gold">Online Corporate</strong> are the exclusive intellectual property of <strong className="text-white">Aturinda Adriel</strong>, <strong className="text-white">Atwakiire Borice</strong>, and <strong className="text-white">Abenaitwe Linus</strong>.
+                      </p>
+                      <div className="bg-black/50 p-5 rounded-2xl border border-white/15 text-xs text-gray-200 font-mono leading-relaxed space-y-2 shadow-inner">
+                        <p className="text-oc-gold font-bold uppercase tracking-wider">STRICT PROHIBITION &amp; LEGAL NOTICE:</p>
+                        <p>
+                          Unauthorized copying, reproduction, distribution, reverse engineering, redistribution, modification, hosting, or commercial exploitation of any portion of this software or platform without explicit written consent from the creators (<strong className="text-white">Aturinda Adriel</strong>, <strong className="text-white">Atwakiire Borice</strong> &amp; <strong className="text-white">Abenaitwe Linus</strong>) is strictly prohibited under international copyright laws, trademark protections, and intellectual property rights regulations.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-oc-gold/90 font-mono border-t border-white/10 relative z-10">
+                      <span>Ref ID: OC-IP-2026-AAL</span>
+                      <span>Platform Creators: Aturinda Adriel, Atwakiire Borice &amp; Abenaitwe Linus</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-oc-navy dark:bg-oc-gold text-white dark:text-oc-navy p-12 rounded-[3rem] text-center space-y-8 relative overflow-hidden shadow-2xl">
+                    <div className="absolute top-0 right-0 p-8 opacity-10">
+                      <LayoutGrid size={120} />
+                    </div>
+                    <h3 className="text-3xl font-serif font-bold relative z-10">Ready to join the network?</h3>
+                    <p className="text-lg opacity-80 max-w-xl mx-auto font-medium relative z-10">
+                      Whether you are an aspiring employee, an established employer, or a visionary business owner, OC Kampala is your stage.
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-4 relative z-10">
+                      <button 
+                        onClick={() => {
+                          if (currentUser) {
+                            setActivePage('home');
+                          } else {
+                            setActivePage('home');
+                          }
+                        }}
+                        className="bg-oc-gold dark:bg-oc-navy text-oc-navy dark:text-oc-gold px-10 py-4 rounded-2xl font-bold text-lg hover:scale-105 transition-all shadow-xl"
+                      >
+                        {currentUser ? 'Return to Home' : 'Get Started Now'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activePage === 'home' && (
+                <div className="space-y-8">
+                  {/* Search bar */}
+                  <div className="relative max-w-3xl mx-auto space-y-3">
+                    <div className="flex flex-col sm:flex-row items-center bg-white dark:bg-oc-navy-mid border border-oc-gold/20 rounded-3xl sm:rounded-full shadow-lg focus-within:ring-2 focus-within:ring-oc-gold transition-all p-1.5 relative">
+                      
+                      {/* Custom Filter Selector */}
+                      <div className="relative shrink-0 w-full sm:w-auto" ref={searchTypeRef}>
+                        <button
+                          type="button"
+                          onClick={() => setIsSearchTypeOpen(!isSearchTypeOpen)}
+                          className="w-full sm:w-auto flex items-center justify-between gap-2.5 bg-oc-cream/80 dark:bg-oc-navy hover:bg-oc-gold/10 dark:hover:bg-oc-gold/10 px-4 py-3 rounded-2xl sm:rounded-l-full sm:rounded-r-none text-xs font-bold text-oc-navy dark:text-oc-gold transition-all border-b sm:border-b-0 sm:border-r border-oc-gold/15"
+                        >
+                          <div className="flex items-center gap-2">
+                            {searchType === 'all' && <Globe size={16} className="text-oc-gold shrink-0" />}
+                            {searchType === 'people' && <Users size={16} className="text-oc-gold shrink-0" />}
+                            {searchType === 'businesses' && <Building size={16} className="text-oc-gold shrink-0" />}
+                            {searchType === 'jobs' && <Briefcase size={16} className="text-oc-gold shrink-0" />}
+                            <span className="uppercase tracking-wider font-extrabold">
+                              {searchType === 'all' ? 'Everywhere' : searchType === 'people' ? 'People' : searchType === 'businesses' ? 'Businesses' : 'Jobs'}
+                            </span>
+                          </div>
+                          <ChevronDown 
+                            size={14} 
+                            className={`text-oc-gold transition-transform duration-200 shrink-0 ${isSearchTypeOpen ? 'rotate-180' : ''}`} 
+                          />
+                        </button>
+
+                        {/* Custom Dropdown Menu */}
+                        {isSearchTypeOpen && (
+                          <div className="absolute left-0 top-full mt-2 w-72 sm:w-80 bg-white dark:bg-oc-navy border border-oc-gold/20 rounded-2xl shadow-2xl p-2 z-50 divide-y divide-oc-gold/5">
+                            <div className="px-3 py-2 text-[10px] font-black uppercase tracking-widest text-gray-400">
+                              Filter Search Category
+                            </div>
+                            <div className="pt-1.5 space-y-1">
+                              {[
+                                { id: 'all', label: 'Everywhere', desc: 'Search across people, companies & jobs', icon: Globe, count: usersList.length + jobs.length },
+                                { id: 'people', label: 'People', desc: 'Find professionals, employees & members', icon: Users, count: usersList.filter(u => u.role === 'Employee' || u.role === 'Employer').length },
+                                { id: 'businesses', label: 'Businesses', desc: 'Discover registered companies & services', icon: Building, count: usersList.filter(u => u.role === 'BusinessOwner').length },
+                                { id: 'jobs', label: 'Jobs', desc: 'Browse career & contract opportunities', icon: Briefcase, count: jobs.length },
+                              ].map(opt => {
+                                const Icon = opt.icon;
+                                const isSelected = searchType === opt.id;
+                                return (
+                                  <button
+                                    key={opt.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSearchType(opt.id as any);
+                                      setIsSearchTypeOpen(false);
+                                    }}
+                                    className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all group ${
+                                      isSelected 
+                                        ? 'bg-oc-gold/15 text-oc-navy dark:text-oc-gold font-bold' 
+                                        : 'hover:bg-oc-cream dark:hover:bg-white/5 text-gray-700 dark:text-gray-200'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                                        isSelected 
+                                          ? 'bg-oc-gold text-oc-navy' 
+                                          : 'bg-oc-gold/10 text-oc-gold group-hover:bg-oc-gold group-hover:text-oc-navy'
+                                      }`}>
+                                        <Icon size={16} />
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="text-xs font-bold flex items-center gap-1.5">
+                                          {opt.label}
+                                          <span className="text-[10px] font-normal text-gray-400">({opt.count})</span>
+                                        </div>
+                                        <div className="text-[10px] text-gray-400 truncate font-normal">{opt.desc}</div>
+                                      </div>
+                                    </div>
+                                    {isSelected && <Check size={16} className="text-oc-gold shrink-0 ml-2" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Search Field */}
+                      <div className="relative flex-1 w-full">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-oc-gold/80" size={18} />
+                        <input 
+                          type="text" 
+                          placeholder={
+                            searchType === 'people' ? "Search by name, occupation, location..." :
+                            searchType === 'businesses' ? "Search by business name, industry..." :
+                            searchType === 'jobs' ? "Search by job title, description..." :
+                            "Search network for people, businesses, jobs..."
+                          }
+                          className="w-full bg-transparent border-none py-3.5 pl-12 pr-10 text-sm focus:ring-0 outline-none text-oc-navy dark:text-white placeholder-gray-400"
+                          value={searchQuery}
+                          onChange={e => setSearchQuery(e.target.value)}
+                        />
+                        {searchQuery && (
+                          <button 
+                            onClick={() => setSearchQuery('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-oc-gold transition-colors p-1"
+                          >
+                            <X size={16} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Quick Category Filter Chips */}
+                    <div className="flex items-center justify-center gap-2 overflow-x-auto pb-1 no-scrollbar text-xs">
+                      {[
+                        { id: 'all', label: 'Everywhere', icon: Globe },
+                        { id: 'people', label: 'People', icon: Users },
+                        { id: 'businesses', label: 'Businesses', icon: Building },
+                        { id: 'jobs', label: 'Jobs', icon: Briefcase },
+                      ].map(chip => {
+                        const ChipIcon = chip.icon;
+                        const active = searchType === chip.id;
+                        return (
+                          <button
+                            key={chip.id}
+                            type="button"
+                            onClick={() => setSearchType(chip.id as any)}
+                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full font-semibold transition-all text-xs ${
+                              active 
+                                ? 'bg-oc-gold text-oc-navy font-bold shadow-md scale-105' 
+                                : 'bg-white/70 dark:bg-oc-navy-mid/70 text-gray-600 dark:text-gray-300 hover:bg-oc-gold/15 hover:text-oc-gold border border-oc-gold/10'
+                            }`}
+                          >
+                            <ChipIcon size={12} />
+                            <span>{chip.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {searchQuery && (
+                      <div className="absolute top-full left-0 right-0 mt-3 bg-white dark:bg-oc-navy border border-oc-gold/20 rounded-3xl shadow-2xl overflow-hidden z-50">
+                        <div className="p-3 border-b border-oc-gold/5 bg-oc-cream/20 flex justify-between items-center">
+                          <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
+                            Search Results in <span className="text-oc-gold">{searchType}</span>
+                          </span>
+                          <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-red-400 p-1">
+                            <X size={14} />
+                          </button>
+                        </div>
+                        <div className="max-h-[60vh] overflow-y-auto">
+                          {searchResults.length > 0 ? searchResults.map((res: any, idx: number) => (
+                            <button 
+                              key={res.id || res.email || idx}
+                              onClick={() => {
+                                if (res.type === 'job') {
+                                  setApplyingForJob(res);
+                                  setActivePage('jobs');
+                                } else {
+                                  setViewingProfile(res);
+                                }
+                                setSearchQuery('');
+                              }}
+                              className="w-full flex items-center gap-4 p-4 hover:bg-oc-gold/5 text-left border-b last:border-0 border-oc-gold/5 transition-colors group"
+                            >
+                              <div className="shrink-0">
+                                {res.type === 'job' ? (
+                                  <div className="w-10 h-10 bg-oc-gold/10 rounded-xl flex items-center justify-center text-oc-gold group-hover:bg-oc-gold group-hover:text-oc-navy transition-colors">
+                                    <Briefcase size={20} />
+                                  </div>
+                                ) : (
+                                  <img src={res.photo || res.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-xl object-cover border border-oc-gold/10" alt="" />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="font-bold text-sm flex items-center gap-2 truncate">
+                                  {res.type === 'job' ? res.title : (res.bizName || res.name)}
+                                  {res.type !== 'job' && (
+                                    <span className="flex items-center gap-0.5 text-oc-gold text-[10px]">
+                                      <Star size={8} fill="currentColor" />
+                                      {calcRating(res.ratings)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-gray-500 flex items-center gap-2">
+                                  <Badge className="bg-oc-gold/5 text-[9px] px-1.5 py-0">
+                                    {res.type === 'job' ? res.type : res.role}
+                                  </Badge>
+                                  <span className="truncate">
+                                    {res.type === 'job' ? (res.posterName + ' • ' + res.location) : (res.speciality || res.occupation || res.location)}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="text-gray-300 group-hover:text-oc-gold transition-colors">
+                                <Search size={14} />
+                              </div>
+                            </button>
+                          )) : (
+                            <div className="p-8 text-center">
+                              <div className="text-gray-300 mb-2 flex justify-center"><Search size={32} /></div>
+                              <p className="text-sm text-gray-500">No results found for "{searchQuery}"</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Trending Businesses */}
+                  <section>
+                    <div className="flex items-center gap-3 mb-4">
+                      <h3 className="text-lg font-serif font-bold">Trending Businesses</h3>
+                      <Badge className="bg-oc-gold/10 text-oc-gold">
+                        {usersList.filter(u => u.role === 'BusinessOwner').length}
+                      </Badge>
+                    </div>
+                    <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar">
+                      {usersList.filter(u => u.role === 'BusinessOwner').map(u => (
+                        <motion.div 
+                          whileHover={{ y: -4 }}
+                          key={u.email}
+                          onClick={() => setViewingProfile(u)}
+                          className="flex-shrink-0 w-48 bg-oc-navy p-5 rounded-2xl border border-oc-gold/15 cursor-pointer relative overflow-hidden group shadow-lg"
+                        >
+                          <div className="absolute top-0 right-0 p-3 opacity-10 text-oc-gold-light group-hover:opacity-20 transition-opacity">
+                            <Building size={64} />
+                          </div>
+                          <img src={u.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-lg object-contain bg-white/5 p-1 mb-4 border border-white/10" alt="" />
+                          <div className="text-white font-bold text-sm mb-1 truncate">{u.bizName}</div>
+                          <div className="flex items-center justify-between">
+                            <div className="text-oc-gold-light text-[10px] uppercase font-medium">{u.speciality || 'Professional'}</div>
+                            <div className="flex items-center gap-0.5 text-oc-gold font-bold text-[10px]">
+                              <Star size={8} fill="currentColor" />
+                              {calcRating(u.ratings)}
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Directory / Grid */}
+                  <section className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {/* Simplified Member Feed */}
+                    {filteredDirectory.map((u: User) => (
+                      <div 
+                        key={u.email}
+                        onClick={() => setViewingProfile(u)}
+                        className="bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/5 hover:border-oc-gold/20 shadow-sm transition-all text-left flex gap-4 cursor-pointer"
+                      >
+                        <img src={u.photo || u.logo || 'https://via.placeholder.com/60'} className="w-16 h-16 rounded-xl object-cover" alt="" />
+                        <div className="min-w-0 flex-1">
+                          <Badge className={
+                            u.role === 'BusinessOwner' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                            u.role === 'Employer' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                            'bg-oc-gold/10 text-oc-gold'
+                          }>
+                            {u.role}
+                          </Badge>
+                          <div className="flex items-center gap-1 text-oc-gold font-bold text-[10px] ml-auto float-right">
+                            <Star size={10} fill="currentColor" />
+                            <span>{calcRating(u.ratings)}</span>
+                          </div>
+                          <div className="font-bold text-sm mt-2 truncate text-oc-navy dark:text-white">{u.bizName || u.name}</div>
+                          <div className="text-xs text-gray-500 truncate">{u.speciality || u.occupation || u.email}</div>
+                          {u.openToWork && u.role === 'Employee' && (
+                            <div className="text-[9px] text-green-600 font-bold uppercase mt-1 flex items-center gap-1">
+                              <div className="w-1 h-1 rounded-full bg-green-500" />
+                              Open to Work
+                            </div>
+                          )}
+                          <div className="mt-2.5 pt-2 border-t border-oc-gold/10 flex items-center justify-between">
+                            <span className="text-[10px] text-gray-400 font-semibold truncate max-w-[90px]">
+                              {u.location || 'Kampala'}
+                            </span>
+                            {currentUser && currentUser.email !== u.email && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setBookingTarget(u);
+                                  setBookingTopic('15-min Discovery Call');
+                                  const tomorrow = new Date();
+                                  tomorrow.setDate(tomorrow.getDate() + 1);
+                                  setBookingDate(tomorrow.toISOString().split('T')[0]);
+                                  setBookingTimeSlot('10:00 AM - 10:30 AM');
+                                  setBookingNotes('');
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 bg-oc-gold/10 hover:bg-oc-gold hover:text-oc-navy text-oc-gold rounded-lg text-[10px] font-extrabold transition-all"
+                              >
+                                <CalendarDays size={12} />
+                                <span>Book Call</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </section>
+                </div>
+              )}
+
+              {activePage === 'jobs' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-2xl font-serif font-bold">Job Board</h2>
+                      <p className="text-xs text-gray-500 mt-1">{filteredJobs.length} positions available</p>
+                    </div>
+                    {(currentUser?.role === 'BusinessOwner' || currentUser?.role === 'Employer') && (
+                      <button 
+                        onClick={() => setShowJobModal(true)}
+                        className="bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-bold shadow-lg"
+                      >
+                        <Plus size={18} />
+                        Post a Job
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filters Toolbar */}
+                  <div className="space-y-4">
+                    <div className="bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/10 shadow-sm flex flex-col md:flex-row gap-4 items-center">
+                      <div className="flex bg-oc-cream dark:bg-white/5 p-1 rounded-xl border border-oc-gold/5 w-full md:w-auto">
+                        {['all', 'fulltime', 'parttime', 'remote', 'contract'].map(type => (
+                          <button
+                            key={type}
+                            onClick={() => setJobTypeFilter(type)}
+                            className={`flex-1 md:flex-none px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all capitalize ${jobTypeFilter === type ? 'bg-oc-navy text-oc-gold shadow-sm' : 'text-gray-500'}`}
+                          >
+                            {type}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="relative flex-1 w-full">
+                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-oc-gold/40" size={16} />
+                        <input 
+                          type="text" 
+                          placeholder="Filter by location (e.g. Kampala)" 
+                          className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl py-2.5 pl-10 pr-4 text-sm outline-none focus:ring-1 focus:ring-oc-gold transition-all"
+                          value={jobLocationFilter}
+                          onChange={e => setJobLocationFilter(e.target.value)}
+                        />
+                        {jobLocationFilter && (
+                          <button 
+                            onClick={() => setJobLocationFilter('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-oc-navy"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {searchHistory.length > 0 && (
+                      <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1">
+                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest shrink-0 ml-1">Recent Searches:</span>
+                        {searchHistory.map(h => (
+                          <button 
+                            key={h.id}
+                            onClick={() => { setJobTypeFilter(h.type); setJobLocationFilter(h.location); }}
+                            className="flex-shrink-0 px-3 py-1 bg-white dark:bg-white/5 border border-oc-gold/10 rounded-full text-[10px] font-bold text-oc-navy dark:text-oc-gold/70 hover:bg-oc-gold hover:text-white dark:hover:text-oc-navy transition-all"
+                          >
+                            {h.type === 'all' ? 'Any' : h.type} {h.location && `in ${h.location}`}
+                          </button>
+                        ))}
+                        <button 
+                          onClick={clearSearchHistory}
+                          className="text-[10px] font-bold text-red-400/60 hover:text-red-500 px-2 uppercase tracking-tighter"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid gap-4">
+                    {filteredJobs.length > 0 ? filteredJobs.map(job => (
+                      <div key={job.id} className="bg-white dark:bg-oc-navy border border-oc-gold/5 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all">
+                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                          <div>
+                            <h3 className="text-lg font-bold text-oc-navy dark:text-white mb-1">{job.title}</h3>
+                            <div className="text-oc-gold font-medium flex items-center gap-2 text-sm">
+                              {job.posterName}
+                              <Badge className="bg-oc-gold/10 text-oc-gold capitalize">{job.type}</Badge>
+                            </div>
+                          </div>
+                          <div className="flex gap-4 text-xs text-gray-500">
+                            {job.location && <div className="flex items-center gap-1"><MapPin size={14} /> {job.location}</div>}
+                            {job.salary && <div className="flex items-center gap-1"><DollarSign size={14} /> {job.salary}</div>}
+                            <div className="flex items-center gap-1"><Calendar size={14} /> {job.time}</div>
+                          </div>
+                        </div>
+                        <p className="mt-4 text-sm text-gray-600 dark:text-gray-400 line-clamp-2">{job.desc}</p>
+                        <div className="mt-6 flex items-center justify-between border-t border-oc-gold/5 pt-4">
+                          <button 
+                            onClick={() => setApplyingForJob(job)}
+                            className="bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-all shadow-md"
+                          >
+                            Apply Now →
+                          </button>
+                          {currentUser?.email === job.posterEmail && (
+                            <button 
+                              onClick={() => setJobs(jobs.filter(j => j.id !== job.id))}
+                              className="text-red-400 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="text-center py-12 bg-white/5 rounded-2xl border border-dashed border-oc-gold/20">
+                        <Briefcase className="mx-auto text-oc-gold/40 mb-3" size={48} />
+                        <p className="text-gray-500 font-medium">
+                          {jobs.length === 0 ? "No jobs posted yet" : "No jobs match your filters"}
+                        </p>
+                        {(jobTypeFilter !== 'all' || jobLocationFilter) && (
+                          <button 
+                            onClick={() => { setJobTypeFilter('all'); setJobLocationFilter(''); }}
+                            className="mt-4 text-oc-gold font-bold text-xs hover:underline"
+                          >
+                            Clear all filters
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activePage === 'messages' && (
+                <div className="bg-white dark:bg-oc-navy border border-oc-gold/5 rounded-2xl h-[calc(100vh-12rem)] flex overflow-hidden shadow-xl">
+                  {/* Threads */}
+                  <div className={`w-full sm:w-80 border-r border-oc-gold/5 flex flex-col ${activeConversation ? 'hidden sm:flex' : 'flex'}`}>
+                    <div className="p-4 border-b border-oc-gold/5 bg-oc-cream/20">
+                      <h3 className="font-serif font-bold text-lg">Conversations</h3>
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                      {Object.keys(messages).filter(k => k.includes(currentUser?.email || '')).length > 0 ? (
+                        Object.keys(messages)
+                          .filter(k => k.includes(currentUser?.email || ''))
+                          .sort((a, b) => {
+                            const lastA = messages[a][messages[a].length - 1]?.time || 0;
+                            const lastB = messages[b][messages[b].length - 1]?.time || 0;
+                            return lastB - lastA;
+                          })
+                          .map(key => {
+                            const otherEmail = key.split('::').find(e => e !== currentUser?.email);
+                            const otherUser = otherEmail ? users[otherEmail] : null;
+                            const lastMsg = messages[key][messages[key].length - 1];
+                            const unreadCount = messages[key].filter(m => m.from !== currentUser?.email && !m.read).length;
+
+                            return (
+                              <button
+                                key={key}
+                                onClick={() => {
+                                  setActiveConversation(otherEmail || null);
+                                  if (otherEmail) markThreadAsRead(otherEmail);
+                                }}
+                                className={`w-full text-left p-4 border-b border-oc-gold/5 hover:bg-oc-gold/5 transition-all flex gap-3 items-center ${activeConversation === otherEmail ? 'bg-oc-gold/10' : ''}`}
+                              >
+                                <img src={otherUser?.photo || otherUser?.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover" alt="" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex justify-between items-baseline mb-1">
+                                    <div className="font-bold text-sm truncate">{otherUser?.name || otherUser?.bizName || otherEmail}</div>
+                                    <div className="text-[9px] text-gray-400 whitespace-nowrap ml-2">
+                                      {lastMsg ? new Date(lastMsg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-gray-500 truncate flex justify-between items-center">
+                                    <span className={unreadCount > 0 ? 'font-bold text-oc-navy dark:text-white' : ''}>
+                                      {lastMsg?.text || 'No messages'}
+                                    </span>
+                                    {unreadCount > 0 && (
+                                      <span className="bg-oc-gold text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full ml-2">
+                                        {unreadCount}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })
+                      ) : (
+                        <div className="p-8 text-center text-gray-500">
+                          <MessageSquare className="mx-auto mb-3 opacity-20" size={32} />
+                          <p className="text-xs">Select a member from the directory to start a conversation</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Current Thread */}
+                  <div className={`flex-1 flex flex-col bg-oc-cream/10 dark:bg-oc-navy-mid/10 ${!activeConversation ? 'hidden sm:flex' : 'flex'}`}>
+                    {activeConversation ? (
+                      <>
+                        {/* Chat Header */}
+                        <div className="p-4 bg-white dark:bg-oc-navy border-b border-oc-gold/5 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <button 
+                              className="sm:hidden p-2 -ml-2 text-gray-500" 
+                              onClick={() => setActiveConversation(null)}
+                            >
+                              <X size={20} />
+                            </button>
+                            <img 
+                              src={users[activeConversation]?.photo || users[activeConversation]?.logo || 'https://via.placeholder.com/32'} 
+                              className="w-8 h-8 rounded-full object-cover" 
+                              alt="" 
+                            />
+                            <div className="min-w-0">
+                              <div className="font-bold text-sm truncate">{users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}</div>
+                              <div className="text-[10px] text-green-500 font-medium">Online</div>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={isCreatingChatMeet}
+                            onClick={() => setChatMeetConfirmModal({
+                              targetEmail: activeConversation,
+                              targetName: users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation
+                            })}
+                            className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white rounded-xl text-xs font-bold shadow-md hover:scale-105 transition-all flex items-center gap-1.5 shrink-0"
+                            title="Start Google Meet Video Call"
+                          >
+                            <Video size={14} />
+                            <span className="hidden sm:inline">Start Meet Call</span>
+                          </button>
+                        </div>
+
+                        {/* Chat Body */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
+                          {messages[[currentUser?.email, activeConversation].sort().join('::')]?.map((m: any, idx: number) => {
+                            const isMine = m.from === currentUser?.email;
+                            const isMeetMessage = typeof m.text === 'string' && (m.text.includes('meet.google.com') || m.text.includes('Google Meet'));
+                            const meetUrlMatch = typeof m.text === 'string' ? m.text.match(/https:\/\/meet\.google\.com\/[a-z0-9-]+/i) : null;
+                            const meetUrl = meetUrlMatch ? meetUrlMatch[0] : null;
+
+                            return (
+                              <div key={idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[85%] sm:max-w-[75%] p-3.5 rounded-2xl text-sm ${
+                                  isMine 
+                                    ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy rounded-tr-none shadow-sm' 
+                                    : 'bg-white dark:bg-oc-navy border border-oc-gold/5 rounded-tl-none shadow-sm'
+                                }`}>
+                                  {isMeetMessage && meetUrl ? (
+                                    <div className="space-y-3">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-7 h-7 rounded-lg bg-emerald-500 text-white flex items-center justify-center shadow">
+                                          <Video size={14} />
+                                        </div>
+                                        <span className="text-xs font-bold uppercase tracking-wider">
+                                          Google Meet Video Room
+                                        </span>
+                                      </div>
+                                      <div className="text-xs opacity-90 whitespace-pre-wrap">
+                                        {m.text}
+                                      </div>
+                                      <div className="pt-1">
+                                        <a
+                                          href={meetUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black shadow transition-all ${
+                                            isMine 
+                                              ? 'bg-oc-gold text-oc-navy dark:bg-oc-navy dark:text-oc-gold hover:scale-105' 
+                                              : 'bg-gradient-to-r from-blue-600 to-emerald-600 text-white hover:scale-105'
+                                          }`}
+                                        >
+                                          <Video size={13} />
+                                          <span>Join Video Call</span>
+                                          <ExternalLink size={12} />
+                                        </a>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div>{m.text}</div>
+                                  )}
+                                  <div className={`text-[9px] mt-1 text-right opacity-60`}>
+                                    {new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Chat Footer */}
+                        <div className="p-4 bg-white dark:bg-oc-navy border-t border-oc-gold/5">
+                          <form 
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              if (messageInput.trim()) {
+                                sendMessage(activeConversation, messageInput);
+                                setMessageInput('');
+                              }
+                            }}
+                            className="flex gap-2"
+                          >
+                            <input 
+                              type="text" 
+                              placeholder="Type your message..." 
+                              className="flex-1 bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-oc-gold outline-none"
+                              value={messageInput}
+                              onChange={e => setMessageInput(e.target.value)}
+                            />
+                            <button 
+                              type="submit"
+                              className="bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy p-3 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-md"
+                            >
+                              <Send size={20} />
+                            </button>
+                          </form>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex-1 flex flex-col items-center justify-center p-8 opacity-40 text-center">
+                        <MessageSquare size={80} className="mb-4 text-oc-gold" />
+                        <div className="text-xl font-serif font-bold">Your Messages</div>
+                        <p className="text-sm mt-1">Select a conversation from the sidebar to chat</p>
+                        <button 
+                          onClick={() => setActivePage('home')}
+                          className="mt-6 text-oc-gold font-bold text-sm hover:underline"
+                        >
+                          Find people to chat with
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activePage === 'community' && (
+                <div className="max-w-2xl mx-auto space-y-6">
+                  {/* Share Box */}
+                  <div className="bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-2xl p-6 shadow-sm">
+                    <div className="flex gap-4">
+                      <img src={currentUser?.photo || currentUser?.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover" alt="" />
+                      <div className="flex-1">
+                        <textarea 
+                          placeholder="Share a professional update or insight..." 
+                          className="w-full bg-oc-cream dark:bg-white/5 order-none rounded-xl p-4 text-sm focus:ring-1 focus:ring-oc-gold outline-none h-24 transition-all"
+                          value={postContent}
+                          onChange={e => setPostContent(e.target.value)}
+                        />
+                        {postImage && (
+                          <div className="mt-4 relative inline-block">
+                            <img src={postImage} className="max-h-48 rounded-xl border border-oc-gold/20" alt="Preview" />
+                            <button onClick={() => setPostImage(null)} className="absolute -top-2 -right-2 bg-red-400 text-white p-1 rounded-full shadow-lg">
+                              <X size={12} />
+                            </button>
+                          </div>
+                        )}
+                        <div className="mt-4 flex items-center justify-between">
+                          <label className="flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-oc-gold cursor-pointer transition-all">
+                            <Camera size={16} />
+                            Add Photo
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              className="hidden" 
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => setPostImage(reader.result as string);
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                            />
+                          </label>
+                          <button 
+                            disabled={!postContent.trim() || isSubmittingPost}
+                            onClick={() => {
+                              setIsSubmittingPost(true);
+                              addCommunityPost(postContent, postImage || undefined);
+                              setPostContent('');
+                              setPostImage(null);
+                              setIsSubmittingPost(false);
+                            }}
+                            className="bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy px-6 py-2 rounded-xl text-xs font-bold shadow-lg disabled:opacity-50"
+                          >
+                            Post to Feed
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Feed */}
+                  <div className="space-y-6">
+                    {communityPosts.length > 0 ? communityPosts.map(post => (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        key={post.id} 
+                        className="bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all"
+                      >
+                        <div className="p-6">
+                          <div className="flex items-center gap-3 mb-4">
+                            <img src={post.authorPhoto || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover border border-oc-gold/10" alt="" />
+                            <div className="flex-1">
+                              <div className="font-bold text-sm">{post.authorName}</div>
+                              <div className="text-[10px] text-gray-400 font-medium whitespace-nowrap overflow-hidden text-ellipsis">@{post.authorEmail.split('@')[0]} • {new Date(post.timestamp).toLocaleDateString()}</div>
+                            </div>
+                          </div>
+                          <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-300 whitespace-pre-wrap">{post.content}</p>
+                          {post.image && (
+                            <img src={post.image} className="mt-4 w-full rounded-xl object-cover border border-oc-gold/5" alt="Post" />
+                          )}
+                          <div className="mt-6 pt-4 border-t border-oc-gold/5 flex items-center gap-6">
+                            <button 
+                              onClick={() => likePost(post.id)}
+                              className={`flex items-center gap-2 text-xs font-bold transition-all ${post.likes.includes(currentUser?.email || '') ? 'text-oc-gold' : 'text-gray-400 hover:text-oc-gold'}`}
+                            >
+                              <ThumbsUp size={16} fill={post.likes.includes(currentUser?.email || '') ? 'currentColor' : 'none'} />
+                              {post.likes.length} Likes
+                            </button>
+                            <button 
+                              onClick={() => {
+                                if (post.authorEmail === currentUser?.email) return;
+                                setActiveConversation(post.authorEmail);
+                                setActivePage('messages');
+                              }}
+                              className="flex items-center gap-2 text-xs font-bold text-gray-400 hover:text-oc-gold transition-all"
+                            >
+                              <MessageSquare size={16} />
+                              Reply
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )) : (
+                      <div className="text-center py-24 bg-white/5 rounded-3xl border border-dashed border-oc-gold/20">
+                        <Globe className="mx-auto text-oc-gold/20 mb-4" size={64} />
+                        <h3 className="text-lg font-serif font-bold text-oc-gold/60">Community Feed is Quiet</h3>
+                        <p className="text-gray-500 text-sm">Be the first to share an update with the network!</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activePage === 'events' && (
+                <div className="space-y-8">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-2xl font-serif font-bold text-oc-navy dark:text-oc-gold">Professional Events</h2>
+                      <p className="text-sm text-gray-500">Workshops, webinars, and networking meetups.</p>
+                    </div>
+                    {currentUser?.role === 'BusinessOwner' && (
+                      <button 
+                        onClick={() => setShowAddEventModal(true)}
+                        className="bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy px-6 py-2 rounded-xl text-xs font-bold shadow-lg flex items-center gap-2"
+                      >
+                        <Plus size={16} />
+                        Host Event
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {events.length > 0 ? events.map(event => (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        key={event.id} 
+                        className="bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-3xl overflow-hidden shadow-sm hover:shadow-xl transition-all group"
+                      >
+                        <div className="aspect-video bg-oc-navy-mid relative overflow-hidden">
+                          {event.image ? (
+                            <img src={event.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" alt="" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-oc-gold/20">
+                              <CalendarDays size={48} />
+                            </div>
+                          )}
+                          <div className="absolute top-4 left-4 bg-oc-gold text-oc-navy text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-tighter">
+                            {event.type}
+                          </div>
+                        </div>
+                        <div className="p-6">
+                          <div className="text-[10px] text-oc-gold font-bold uppercase mb-2">{event.date} • {event.location}</div>
+                          <h3 className="font-bold text-lg mb-2">{event.title}</h3>
+                          <p className="text-xs text-gray-500 line-clamp-2 mb-4">{event.description}</p>
+                          
+                          {event.meetUri && (event.attendees.includes(currentUser?.email || '') || event.hostEmail === currentUser?.email) && (
+                            <a
+                              href={event.meetUri}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-full mb-4 py-2.5 px-3 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 shadow-md transition-all hover:scale-[1.02]"
+                            >
+                              <Video size={14} />
+                              <span>Join Google Meet Video</span>
+                              <ExternalLink size={13} />
+                            </a>
+                          )}
+
+                          <div className="flex items-center justify-between pt-4 border-t border-oc-gold/5">
+                            <div className="flex -space-x-2">
+                              {event.attendees.slice(0, 3).map(a => (
+                                <div key={a} className="w-6 h-6 rounded-full border border-oc-navy bg-oc-gold/20 flex items-center justify-center text-[8px] font-bold text-oc-gold">
+                                  {a.charAt(0).toUpperCase()}
+                                </div>
+                              ))}
+                              {event.attendees.length > 3 && (
+                                <div className="w-6 h-6 rounded-full border border-oc-navy bg-oc-gold/10 flex items-center justify-center text-[8px] font-bold text-gray-400">
+                                  +{event.attendees.length - 3}
+                                </div>
+                              )}
+                            </div>
+                            <button 
+                              onClick={() => joinEvent(event.id)}
+                              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${event.attendees.includes(currentUser?.email || '') ? 'bg-green-500/10 text-green-500' : 'bg-oc-gold/10 text-oc-gold hover:bg-oc-gold hover:text-oc-navy'}`}
+                            >
+                              {event.attendees.includes(currentUser?.email || '') ? '✓ Registered' : 'Register Now'}
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )) : (
+                      <div className="col-span-full text-center py-24 bg-white/5 rounded-3xl border border-dashed border-oc-gold/20">
+                        <CalendarDays className="mx-auto text-oc-gold/20 mb-4" size={64} />
+                        <h3 className="text-lg font-serif font-bold text-oc-gold/60">No upcoming events</h3>
+                        <p className="text-gray-500 text-sm">Stay tuned for workshops and webinars from the community.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activePage === 'applications' && (
+                <div className="space-y-8">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-2xl font-serif font-bold text-oc-navy dark:text-oc-gold">Job Applications</h2>
+                      <p className="text-sm text-gray-500">
+                        {currentUser?.role === 'Employee' 
+                          ? 'Track your professional journey and application statuses.' 
+                          : 'Manage incoming talent and update recruitment progress.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-6">
+                    {/* Filter for Employers could be added here if needed */}
+                    
+                    {(() => {
+                      const displayedApps = currentUser?.role === 'Employee' 
+                        ? applications.filter(a => a.candidateEmail === currentUser.email)
+                        : applications.filter(a => a.employerEmail === currentUser.email);
+
+                      if (displayedApps.length === 0) {
+                        return (
+                          <div className="text-center py-24 bg-white/5 rounded-3xl border border-dashed border-oc-gold/20">
+                            <CheckCircle className="mx-auto text-oc-gold/20 mb-4" size={64} />
+                            <h3 className="text-lg font-serif font-bold text-oc-gold/60">No applications found</h3>
+                            <p className="text-gray-500 text-sm">
+                              {currentUser?.role === 'Employee' 
+                                ? "You haven't applied for any jobs yet." 
+                                : "No candidates have applied for your postings yet."}
+                            </p>
+                            {currentUser?.role === 'Employee' && (
+                              <button 
+                                onClick={() => setActivePage('jobs')}
+                                className="mt-6 bg-oc-gold text-oc-navy px-6 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-all"
+                              >
+                                Browse Jobs
+                              </button>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      return displayedApps.map(app => (
+                        <motion.div 
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          key={app.id} 
+                          className="bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center gap-6"
+                        >
+                          <div className="flex items-center gap-4 flex-1">
+                            {currentUser?.role === 'Employee' ? (
+                              <div className="w-12 h-12 bg-oc-gold/10 rounded-xl flex items-center justify-center text-oc-gold">
+                                <Briefcase size={24} />
+                              </div>
+                            ) : (
+                              <img src={app.candidatePhoto || 'https://via.placeholder.com/48'} className="w-12 h-12 rounded-xl object-cover border border-oc-gold/20" alt="" />
+                            )}
+                            <div>
+                              <h4 className="font-bold text-oc-navy dark:text-white truncate">{app.jobTitle}</h4>
+                              <p className="text-xs text-gray-500">
+                                {currentUser?.role === 'Employee' ? 'Sent to Business' : `Candidate: ${app.candidateName}`}
+                              </p>
+                              <div className="text-[10px] text-gray-400 mt-1 uppercase font-bold tracking-tighter">
+                                Applied: {new Date(app.appliedAt).toLocaleDateString()}
+                              </div>
+
+                              {app.status === 'Interviewing' && app.interviewDate && (
+                                <div className="mt-3 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/50 text-xs space-y-2">
+                                  <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 font-bold">
+                                    <Video size={15} className="text-emerald-500 shrink-0" />
+                                    <span>Interview: {app.interviewDate} ({app.interviewTime})</span>
+                                  </div>
+                                  {app.meetUri && (
+                                    <a
+                                      href={app.meetUri}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white rounded-lg font-bold text-xs shadow transition-all hover:scale-105"
+                                    >
+                                      <Video size={13} />
+                                      <span>Join Google Meet</span>
+                                      <ExternalLink size={12} />
+                                    </a>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col md:items-end gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Status:</span>
+                              <Badge className={
+                                app.status === 'Applied' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                                app.status === 'Under Review' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
+                                app.status === 'Interviewing' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' :
+                                app.status === 'Offered' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                                'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                              }>
+                                {app.status}
+                              </Badge>
+                            </div>
+                            
+                            {(currentUser?.role === 'Employer' || currentUser?.role === 'BusinessOwner') && app.employerEmail === currentUser.email && (
+                              <div className="space-y-2 mt-2">
+                                <div className="flex flex-wrap gap-1">
+                                  {(['Applied', 'Under Review', 'Interviewing', 'Offered', 'Rejected'] as any[]).map(s => (
+                                    <button
+                                      key={s}
+                                      onClick={() => updateApplicationStatus(app.id, s)}
+                                      className={`px-2 py-1 rounded-md text-[8px] font-black uppercase transition-all ${app.status === s ? 'bg-oc-navy text-oc-gold' : 'bg-gray-100 dark:bg-white/5 text-gray-400 hover:text-oc-navy'}`}
+                                    >
+                                      {s}
+                                    </button>
+                                  ))}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setSchedulingInterviewForApp(app)}
+                                  className="w-full py-1.5 px-2.5 bg-gradient-to-r from-blue-600/10 to-emerald-600/10 hover:from-blue-600/20 hover:to-emerald-600/20 text-blue-600 dark:text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] font-extrabold flex items-center justify-center gap-1.5 transition-all"
+                                >
+                                  <Video size={12} className="text-emerald-500" />
+                                  <span>Schedule Google Meet Interview</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-3 border-t md:border-t-0 md:border-l border-oc-gold/5 pt-4 md:pt-0 md:pl-6">
+                            <button 
+                              onClick={() => {
+                                const targetEmail = currentUser?.role === 'Employee' ? app.employerEmail : app.candidateEmail;
+                                setActivePage('messages');
+                                setActiveConversation(targetEmail);
+                              }}
+                              className="p-2 text-oc-gold hover:bg-oc-gold/10 rounded-lg transition-colors"
+                              title="Message Candidate/Employer"
+                            >
+                              <MessageSquare size={18} />
+                            </button>
+                            {currentUser?.role !== 'Employee' && (
+                              <button 
+                                onClick={() => setViewingProfile(users[app.candidateEmail])}
+                                className="p-2 text-oc-gold hover:bg-oc-gold/10 rounded-lg transition-colors"
+                                title="View Candidate Profile"
+                              >
+                                <UserCircle size={18} />
+                              </button>
+                            )}
+                          </div>
+                        </motion.div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {activePage === 'notifications' && (
+                <div className="bg-white dark:bg-oc-navy border border-oc-gold/5 rounded-2xl shadow-xl overflow-hidden">
+                  <div className="p-6 border-b border-oc-gold/5 flex items-center justify-between">
+                    <h2 className="text-xl font-serif font-bold">All Notifications</h2>
+                    <button 
+                      onClick={() => markNotifsRead()}
+                      className="text-sm text-gray-500 hover:text-oc-gold"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                  <div>
+                    {notifications.length > 0 ? (
+                      notifications.map(notif => (
+                        <div key={notif.id} className={`p-6 border-b last:border-0 border-oc-gold/5 flex gap-4 items-start ${!notif.read ? 'bg-oc-gold/5' : ''}`}>
+                          <div className={`p-3 rounded-xl ${
+                            notif.type === 'msg' ? 'bg-blue-100 text-blue-600' :
+                            notif.type === 'job' ? 'bg-green-100 text-green-600' :
+                            'bg-oc-gold/10 text-oc-gold'
+                          }`}>
+                            {notif.type === 'msg' ? <MessageSquare size={20} /> : <Bell size={20} />}
+                          </div>
+                          <div className="flex-1">
+                            <div className="text-sm font-semibold">{notif.text}</div>
+                            {notif.sub && <div className="text-xs text-gray-500 mt-1">{notif.sub}</div>}
+                            <div className="text-[10px] text-gray-400 mt-2">{new Date(notif.time).toLocaleString()}</div>
+                          </div>
+                          {!notif.read && <div className="w-2 h-2 rounded-full bg-oc-gold mt-2" />}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-12 text-center text-gray-500">No notifications yet</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ADMIN CONTROLS VIEW */}
+              {activePage === 'admin' && (
+                !isMainAdmin ? (
+                  <div className="max-w-md mx-auto my-12 bg-white dark:bg-oc-navy p-8 rounded-3xl border border-red-500/30 text-center space-y-4 shadow-xl">
+                    <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-2xl flex items-center justify-center mx-auto">
+                      <ShieldAlert size={32} />
+                    </div>
+                    <h2 className="text-xl font-serif font-bold text-oc-navy dark:text-white">Access Restricted</h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                      The Admin Control Center is strictly reserved for the master administrator account (<strong className="text-oc-navy dark:text-oc-gold">adrielaturinda4@gmail.com</strong>).
+                    </p>
+                    <button
+                      onClick={() => setActivePage('home')}
+                      className="px-6 py-2.5 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold rounded-xl text-xs hover:bg-oc-navy-mid transition-all shadow"
+                    >
+                      Return to Home
+                    </button>
+                  </div>
+                ) : (
+                <div className="space-y-8 max-w-6xl mx-auto">
+                  {/* Admin Header & System Status Banner */}
+                  <div className="bg-gradient-to-r from-oc-navy via-slate-900 to-oc-navy text-white rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/20 relative overflow-hidden">
+                    <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-oc-gold/5 rounded-l-full blur-2xl pointer-events-none" />
+                    <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="px-3 py-1 bg-oc-gold text-oc-navy font-black text-[10px] uppercase tracking-widest rounded-full flex items-center gap-1.5 shadow-sm">
+                            <Shield size={12} /> Admin Control Center
+                          </span>
+                          <span className="px-2.5 py-0.5 bg-green-500/20 text-green-400 border border-green-500/30 text-[10px] font-bold rounded-full flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-ping" /> System Operational
+                          </span>
+                        </div>
+                        <h1 className="text-2xl sm:text-3xl font-serif font-bold text-oc-gold-light">
+                          Platform Management & Moderation
+                        </h1>
+                        <p className="text-xs text-gray-300 max-w-xl">
+                          Review identity verifications, manage member accounts, moderate job & community listings, and dispatch platform announcements.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          onClick={() => setAdminTab('broadcast')}
+                          className="px-4 py-2.5 bg-oc-gold text-oc-navy font-bold rounded-2xl text-xs shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+                        >
+                          <Send size={15} />
+                          Broadcast System Message
+                        </button>
+                        
+                        <span className="px-3.5 py-2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-2xl text-xs font-bold flex items-center gap-2">
+                          <Shield size={15} /> Sole Master Administrator
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Metric Overview Cards */}
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div className="bg-white dark:bg-oc-navy p-5 rounded-2xl border border-oc-gold/10 shadow-sm flex flex-col justify-between">
+                      <div className="flex items-center justify-between text-gray-500">
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Total Members</span>
+                        <Users size={18} className="text-oc-gold" />
+                      </div>
+                      <div className="mt-3">
+                        <div className="text-2xl font-black text-oc-navy dark:text-white">{Object.keys(users).length}</div>
+                        <div className="text-[10px] text-gray-400 mt-0.5">Registered user accounts</div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white dark:bg-oc-navy p-5 rounded-2xl border border-amber-500/20 shadow-sm flex flex-col justify-between relative overflow-hidden">
+                      {pendingVerificationsCount > 0 && <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-bl-full animate-pulse" />}
+                      <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Pending ID Reviews</span>
+                        <ShieldAlert size={18} />
+                      </div>
+                      <div className="mt-3">
+                        <div className="text-2xl font-black text-amber-600 dark:text-amber-400">{pendingVerificationsCount}</div>
+                        <div className="text-[10px] text-gray-400 mt-0.5">Documents waiting</div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white dark:bg-oc-navy p-5 rounded-2xl border border-blue-500/20 shadow-sm flex flex-col justify-between">
+                      <div className="flex items-center justify-between text-blue-500">
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Verified Badges</span>
+                        <ShieldCheck size={18} />
+                      </div>
+                      <div className="mt-3">
+                        <div className="text-2xl font-black text-blue-600 dark:text-blue-400">
+                          {(Object.values(users) as User[]).filter(u => u.isVerified).length}
+                        </div>
+                        <div className="text-[10px] text-gray-400 mt-0.5">Verified members</div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white dark:bg-oc-navy p-5 rounded-2xl border border-oc-gold/10 shadow-sm flex flex-col justify-between">
+                      <div className="flex items-center justify-between text-gray-500">
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Active Jobs</span>
+                        <Briefcase size={18} className="text-oc-gold" />
+                      </div>
+                      <div className="mt-3">
+                        <div className="text-2xl font-black text-oc-navy dark:text-white">{jobs.length}</div>
+                        <div className="text-[10px] text-gray-400 mt-0.5">{announcements.length} announcements</div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white dark:bg-oc-navy p-5 rounded-2xl border border-oc-gold/10 shadow-sm flex flex-col justify-between col-span-2 md:col-span-1">
+                      <div className="flex items-center justify-between text-gray-500">
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Community Posts</span>
+                        <Globe size={18} className="text-oc-gold" />
+                      </div>
+                      <div className="mt-3">
+                        <div className="text-2xl font-black text-oc-navy dark:text-white">{communityPosts.length}</div>
+                        <div className="text-[10px] text-gray-400 mt-0.5">{events.length} hosted events</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Admin Navigation Tabs */}
+                  <div className="flex items-center gap-2 border-b border-oc-gold/15 pb-2 overflow-x-auto scrollbar-none">
+                    <button
+                      onClick={() => setAdminTab('verifications')}
+                      className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+                        adminTab === 'verifications'
+                          ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy shadow-lg font-black'
+                          : 'bg-white dark:bg-oc-navy text-gray-500 hover:text-oc-navy dark:hover:text-white border border-oc-gold/10'
+                      }`}
+                    >
+                      <ShieldCheck size={16} />
+                      Identity Verifications
+                      {pendingVerificationsCount > 0 && (
+                        <span className="bg-red-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                          {pendingVerificationsCount}
+                        </span>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => setAdminTab('users')}
+                      className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+                        adminTab === 'users'
+                          ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy shadow-lg font-black'
+                          : 'bg-white dark:bg-oc-navy text-gray-500 hover:text-oc-navy dark:hover:text-white border border-oc-gold/10'
+                      }`}
+                    >
+                      <Users size={16} />
+                      User Accounts ({Object.keys(users).length})
+                    </button>
+
+                    <button
+                      onClick={() => setAdminTab('jobs')}
+                      className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+                        adminTab === 'jobs'
+                          ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy shadow-lg font-black'
+                          : 'bg-white dark:bg-oc-navy text-gray-500 hover:text-oc-navy dark:hover:text-white border border-oc-gold/10'
+                      }`}
+                    >
+                      <Briefcase size={16} />
+                      Jobs & Announcements ({jobs.length + announcements.length})
+                    </button>
+
+                    <button
+                      onClick={() => setAdminTab('community')}
+                      className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+                        adminTab === 'community'
+                          ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy shadow-lg font-black'
+                          : 'bg-white dark:bg-oc-navy text-gray-500 hover:text-oc-navy dark:hover:text-white border border-oc-gold/10'
+                      }`}
+                    >
+                      <Globe size={16} />
+                      Community & Events ({communityPosts.length + events.length})
+                    </button>
+
+                    <button
+                      onClick={() => setAdminTab('broadcast')}
+                      className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+                        adminTab === 'broadcast'
+                          ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy shadow-lg font-black'
+                          : 'bg-white dark:bg-oc-navy text-gray-500 hover:text-oc-navy dark:hover:text-white border border-oc-gold/10'
+                      }`}
+                    >
+                      <Bell size={16} />
+                      System Broadcast
+                    </button>
+                  </div>
+
+                  {/* TAB 1: IDENTITY VERIFICATION QUEUE */}
+                  {adminTab === 'verifications' && (
+                    <div className="space-y-6">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/10">
+                        <div>
+                          <h3 className="text-base font-serif font-bold text-oc-navy dark:text-oc-gold-light">
+                            National Document Submissions Review
+                          </h3>
+                          <p className="text-xs text-gray-500">
+                            Inspect uploaded National IDs, Passports, or Business Licenses to approve or decline verification badges.
+                          </p>
+                        </div>
+                      </div>
+
+                      {(Object.values(users) as User[]).filter(u => u.verificationPending || u.verificationDoc || u.isVerified).length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {(Object.values(users) as User[])
+                            .filter(u => u.verificationPending || u.verificationDoc || u.isVerified)
+                            .map(u => (
+                              <div key={u.email} className="bg-white dark:bg-oc-navy rounded-2xl border border-oc-gold/10 p-5 shadow-sm space-y-4 flex flex-col justify-between">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-12 h-12 rounded-full bg-oc-gold/10 overflow-hidden flex items-center justify-center shrink-0 border border-oc-gold/20">
+                                      {u.photo || u.logo ? (
+                                        <img src={u.photo || u.logo} alt={u.name} className="w-full h-full object-cover" />
+                                      ) : (
+                                        <span className="font-serif font-bold text-oc-gold text-lg">
+                                          {(u.name || u.bizName || u.email).charAt(0).toUpperCase()}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div>
+                                      <div className="flex items-center gap-1.5">
+                                        <h4 className="font-serif font-bold text-sm text-oc-navy dark:text-white">
+                                          {u.name || u.bizName || u.email}
+                                        </h4>
+                                        {u.isVerified && <CheckCircle size={14} className="text-blue-500 shrink-0" />}
+                                      </div>
+                                      <p className="text-xs text-gray-500">{u.email}</p>
+                                      <div className="flex items-center gap-2 mt-1">
+                                        <Badge className="bg-oc-gold/10 text-oc-gold">{u.role || 'Member'}</Badge>
+                                        {u.country && <span className="text-[10px] text-gray-400">{u.country}</span>}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    {u.isVerified ? (
+                                      <span className="px-2.5 py-1 bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 text-[10px] font-bold rounded-full flex items-center gap-1">
+                                        <CheckCircle size={12} /> Verified Member
+                                      </span>
+                                    ) : u.verificationPending ? (
+                                      <span className="px-2.5 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-full flex items-center gap-1 animate-pulse">
+                                        <Clock size={12} /> Pending Review
+                                      </span>
+                                    ) : (
+                                      <span className="px-2.5 py-1 bg-gray-500/10 text-gray-500 text-[10px] font-bold rounded-full">
+                                        Unverified
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="p-3 bg-oc-cream/50 dark:bg-white/5 rounded-xl border border-oc-gold/10 space-y-1.5">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-gray-500 font-medium">Document Type:</span>
+                                    <strong className="text-oc-navy dark:text-oc-gold">{u.verificationType || 'National ID / Passport'}</strong>
+                                  </div>
+                                  {u.verificationReason && (
+                                    <div className="text-[11px] text-gray-500 italic border-t border-oc-gold/5 pt-1.5">
+                                      "{u.verificationReason}"
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="pt-2 border-t border-oc-gold/10 flex items-center justify-between gap-3">
+                                  {u.verificationDoc ? (
+                                    <button
+                                      onClick={() => setAdminDocPreview({ user: u })}
+                                      className="px-3 py-1.5 bg-oc-gold/10 hover:bg-oc-gold/20 text-oc-gold rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
+                                    >
+                                      <Eye size={14} /> Inspect Image
+                                    </button>
+                                  ) : (
+                                    <span className="text-[11px] text-gray-400 italic">No image file attached</span>
+                                  )}
+
+                                  <div className="flex items-center gap-2">
+                                    {!u.isVerified ? (
+                                      <>
+                                        <button
+                                          onClick={() => {
+                                            toggleUserVerified(u.email, true, 'Approved by Platform Administrator');
+                                          }}
+                                          className="px-3 py-1.5 bg-green-600 text-white rounded-xl text-xs font-bold shadow hover:bg-green-700 transition-all flex items-center gap-1"
+                                        >
+                                          <Check size={14} /> Approve
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setDeclineReasonModal({ email: u.email, name: u.name || u.email });
+                                            setDeclineReasonInput('');
+                                          }}
+                                          className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold transition-all flex items-center gap-1"
+                                        >
+                                          <X size={14} /> Decline
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <button
+                                        onClick={() => {
+                                          if (confirm(`Revoke verified badge for ${u.name || u.email}?`)) {
+                                            toggleUserVerified(u.email, false, 'Verified badge revoked by Administrator');
+                                          }
+                                        }}
+                                        className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold transition-all"
+                                      >
+                                        Revoke Badge
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      ) : (
+                        <div className="p-12 text-center bg-white dark:bg-oc-navy rounded-2xl border border-oc-gold/10 space-y-3">
+                          <ShieldCheck size={48} className="mx-auto text-oc-gold/40" />
+                          <h3 className="text-lg font-serif font-bold text-oc-navy dark:text-oc-gold-light">
+                            No Verification Submissions
+                          </h3>
+                          <p className="text-xs text-gray-500 max-w-md mx-auto">
+                            Uploaded national identity documents from members will appear here for review.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 2: USER DIRECTORY & ROLES */}
+                  {adminTab === 'users' && (
+                    <div className="space-y-6">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/10">
+                        <div className="relative flex-1 max-w-md">
+                          <Search size={16} className="absolute left-3.5 top-3.5 text-gray-400" />
+                          <input
+                            type="text"
+                            placeholder="Search users by name, email, or country..."
+                            value={adminSearchQuery}
+                            onChange={e => setAdminSearchQuery(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2.5 bg-oc-cream/60 dark:bg-white/5 rounded-xl text-xs outline-none border border-oc-gold/15 text-oc-navy dark:text-white"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Filter size={14} className="text-oc-gold" />
+                          <span className="text-xs font-bold text-gray-500">Role:</span>
+                          <select
+                            value={adminRoleFilter}
+                            onChange={e => setAdminRoleFilter(e.target.value as any)}
+                            className="bg-oc-cream/60 dark:bg-white/5 border border-oc-gold/15 rounded-xl px-3 py-2 text-xs outline-none text-oc-navy dark:text-white font-bold"
+                          >
+                            <option value="all">All Roles</option>
+                            <option value="Employee">Employee / Candidate</option>
+                            <option value="Employer">Employer</option>
+                            <option value="BusinessOwner">Business Owner</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="bg-white dark:bg-oc-navy rounded-2xl border border-oc-gold/10 overflow-hidden shadow-sm">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-oc-cream/80 dark:bg-white/5 uppercase text-[10px] font-bold text-gray-500 border-b border-oc-gold/10">
+                              <tr>
+                                <th className="p-4">User Details</th>
+                                <th className="p-4">Role & Location</th>
+                                <th className="p-4">Badges & Permissions</th>
+                                <th className="p-4 text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-oc-gold/5">
+                              {(Object.values(users) as User[])
+                                .filter(u => {
+                                  const matchesSearch = !adminSearchQuery || 
+                                    (u.name || '').toLowerCase().includes(adminSearchQuery.toLowerCase()) ||
+                                    (u.bizName || '').toLowerCase().includes(adminSearchQuery.toLowerCase()) ||
+                                    u.email.toLowerCase().includes(adminSearchQuery.toLowerCase()) ||
+                                    (u.country || '').toLowerCase().includes(adminSearchQuery.toLowerCase());
+                                  const matchesRole = adminRoleFilter === 'all' || u.role === adminRoleFilter;
+                                  return matchesSearch && matchesRole;
+                                })
+                                .map(u => (
+                                  <tr key={u.email} className="hover:bg-oc-gold/5 transition-colors">
+                                    <td className="p-4">
+                                      <div className="flex items-center gap-3">
+                                        <div className="w-9 h-9 rounded-full bg-oc-gold/10 overflow-hidden flex items-center justify-center shrink-0 border border-oc-gold/20">
+                                          {u.photo || u.logo ? (
+                                            <img src={u.photo || u.logo} alt={u.name} className="w-full h-full object-cover" />
+                                          ) : (
+                                            <span className="font-bold text-oc-gold text-xs">
+                                              {(u.name || u.bizName || u.email).charAt(0).toUpperCase()}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div>
+                                          <div className="font-bold text-oc-navy dark:text-white flex items-center gap-1">
+                                            {u.name || u.bizName || u.email}
+                                            {u.isVerified && <CheckCircle size={13} className="text-blue-500 shrink-0" />}
+                                          </div>
+                                          <div className="text-[11px] text-gray-400">{u.email}</div>
+                                        </div>
+                                      </div>
+                                    </td>
+
+                                    <td className="p-4">
+                                      <Badge className="bg-oc-gold/10 text-oc-gold mb-1 inline-block">{u.role || 'Member'}</Badge>
+                                      <div className="text-[11px] text-gray-500">{u.country || 'Location not set'}</div>
+                                    </td>
+
+                                    <td className="p-4 space-y-1">
+                                      <div className="flex flex-wrap gap-1">
+                                        {u.isVerified && (
+                                          <span className="px-2 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[9px] font-bold rounded-md">
+                                            Verified
+                                          </span>
+                                        )}
+                                        {u.isAdmin && (
+                                          <span className="px-2 py-0.5 bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[9px] font-bold rounded-md">
+                                            Admin
+                                          </span>
+                                        )}
+                                        {u.openToWork && (
+                                          <span className="px-2 py-0.5 bg-green-500/10 text-green-600 dark:text-green-400 text-[9px] font-bold rounded-md">
+                                            Open To Work
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+
+                                    <td className="p-4 text-right">
+                                      <div className="flex items-center justify-end gap-2">
+                                        <button
+                                          onClick={() => toggleUserVerified(u.email, !u.isVerified)}
+                                          className={`p-2 rounded-xl transition-all ${
+                                            u.isVerified 
+                                              ? 'bg-blue-500/10 text-blue-500 hover:bg-blue-500/20' 
+                                              : 'bg-gray-100 dark:bg-white/5 text-gray-400 hover:text-blue-500'
+                                          }`}
+                                          title={u.isVerified ? "Revoke Verified Badge" : "Grant Verified Badge"}
+                                        >
+                                          <ShieldCheck size={16} />
+                                        </button>
+
+                                        {u.email.toLowerCase() === 'adrielaturinda4@gmail.com' && (
+                                          <span className="p-2 bg-purple-500/10 text-purple-500 rounded-xl" title="Sole Master Administrator">
+                                            <Shield size={16} />
+                                          </span>
+                                        )}
+
+                                        <button
+                                          onClick={() => setViewingProfile(u)}
+                                          className="p-2 bg-oc-gold/10 text-oc-gold hover:bg-oc-gold/20 rounded-xl transition-all"
+                                          title="View Full Profile"
+                                        >
+                                          <Eye size={16} />
+                                        </button>
+
+                                        <button
+                                          onClick={() => {
+                                            if (confirm(`Are you sure you want to delete the account for ${u.email}?`)) {
+                                              deleteUser(u.email);
+                                            }
+                                          }}
+                                          className="p-2 bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-xl transition-all"
+                                          title="Delete Account"
+                                        >
+                                          <Trash2 size={16} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 3: JOBS & ANNOUNCEMENTS MODERATION */}
+                  {adminTab === 'jobs' && (
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/10">
+                            <div>
+                              <h3 className="font-serif font-bold text-base text-oc-navy dark:text-oc-gold-light">
+                                Posted Jobs ({jobs.length})
+                              </h3>
+                              <p className="text-xs text-gray-500">Manage active job listings</p>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                            {jobs.length > 0 ? (
+                              jobs.map(job => (
+                                <div key={job.id} className="bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/10 shadow-sm flex items-start justify-between gap-3">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <Badge className="bg-oc-gold/10 text-oc-gold">{job.type}</Badge>
+                                      <span className="text-[10px] text-gray-400">{job.time}</span>
+                                    </div>
+                                    <h4 className="font-bold text-sm text-oc-navy dark:text-white">{job.title}</h4>
+                                    <p className="text-xs text-gray-500">{job.posterName} • {job.location}</p>
+                                    {job.salary && <p className="text-[11px] font-bold text-oc-gold">{job.salary}</p>}
+                                  </div>
+
+                                  <button
+                                    onClick={() => {
+                                      if (confirm(`Remove job listing "${job.title}"?`)) {
+                                        deleteJob(job.id);
+                                      }
+                                    }}
+                                    className="p-2.5 bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-xl transition-all shrink-0"
+                                    title="Delete Job"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="p-8 text-center text-gray-500 bg-white dark:bg-oc-navy rounded-2xl border border-oc-gold/10 text-xs">
+                                No job listings posted yet.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/10">
+                            <div>
+                              <h3 className="font-serif font-bold text-base text-oc-navy dark:text-oc-gold-light">
+                                Announcements ({announcements.length})
+                              </h3>
+                              <p className="text-xs text-gray-500">Public hiring & candidate notices</p>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                            {announcements.length > 0 ? (
+                              announcements.map(ann => (
+                                <div key={ann.id} className="bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/10 shadow-sm flex items-start justify-between gap-3">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <Badge className="bg-oc-gold/10 text-oc-gold">{ann.type}</Badge>
+                                      <span className="text-[10px] text-gray-400">{ann.time}</span>
+                                    </div>
+                                    <h4 className="font-bold text-sm text-oc-navy dark:text-white">{ann.title}</h4>
+                                    <p className="text-xs text-gray-500">{ann.posterName} ({ann.posterEmail})</p>
+                                    <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-2">{ann.desc}</p>
+                                  </div>
+
+                                  <button
+                                    onClick={() => {
+                                      if (confirm(`Delete announcement "${ann.title}"?`)) {
+                                        deleteAnnouncement(ann.id);
+                                      }
+                                    }}
+                                    className="p-2.5 bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-xl transition-all shrink-0"
+                                    title="Delete Announcement"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="p-8 text-center text-gray-500 bg-white dark:bg-oc-navy rounded-2xl border border-oc-gold/10 text-xs">
+                                No announcements posted yet.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 4: COMMUNITY & EVENTS MODERATION */}
+                  {adminTab === 'community' && (
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-4">
+                          <div className="bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/10">
+                            <h3 className="font-serif font-bold text-base text-oc-navy dark:text-oc-gold-light">
+                              Community Feed Posts ({communityPosts.length})
+                            </h3>
+                            <p className="text-xs text-gray-500">Moderate member feed activity</p>
+                          </div>
+
+                          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                            {communityPosts.length > 0 ? (
+                              communityPosts.map(post => (
+                                <div key={post.id} className="bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/10 shadow-sm space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <div className="font-bold text-xs text-oc-navy dark:text-white">{post.authorName}</div>
+                                    <button
+                                      onClick={() => {
+                                        if (confirm("Delete this community post?")) {
+                                          deleteCommunityPost(post.id);
+                                        }
+                                      }}
+                                      className="p-1.5 text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                      title="Delete Post"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </div>
+                                  <p className="text-xs text-gray-600 dark:text-gray-300">{post.content}</p>
+                                  {post.image && (
+                                    <img src={post.image} alt="Attachment" className="w-full h-32 object-cover rounded-xl mt-2" />
+                                  )}
+                                </div>
+                              ))
+                            ) : (
+                              <div className="p-8 text-center text-gray-500 bg-white dark:bg-oc-navy rounded-2xl border border-oc-gold/10 text-xs">
+                                No community posts found.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div className="bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/10">
+                            <h3 className="font-serif font-bold text-base text-oc-navy dark:text-oc-gold-light">
+                              Professional Events & Webinars ({events.length})
+                            </h3>
+                            <p className="text-xs text-gray-500">Manage hosted workshops & meetups</p>
+                          </div>
+
+                          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                            {events.length > 0 ? (
+                              events.map(e => (
+                                <div key={e.id} className="bg-white dark:bg-oc-navy p-4 rounded-2xl border border-oc-gold/10 shadow-sm flex items-start justify-between gap-3">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <Badge className="bg-oc-gold/10 text-oc-gold">{e.type}</Badge>
+                                      <span className="text-[10px] text-gray-400">{e.date}</span>
+                                    </div>
+                                    <h4 className="font-bold text-sm text-oc-navy dark:text-white">{e.title}</h4>
+                                    <p className="text-xs text-gray-500">Host: {e.hostName} • {e.attendees.length} Attendees</p>
+                                  </div>
+
+                                  <button
+                                    onClick={() => {
+                                      if (confirm(`Delete event "${e.title}"?`)) {
+                                        deleteEvent(e.id);
+                                      }
+                                    }}
+                                    className="p-2.5 bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-xl transition-all shrink-0"
+                                    title="Delete Event"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="p-8 text-center text-gray-500 bg-white dark:bg-oc-navy rounded-2xl border border-oc-gold/10 text-xs">
+                                No events created yet.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 5: BROADCAST SYSTEM */}
+                  {adminTab === 'broadcast' && (
+                    <div className="bg-white dark:bg-oc-navy rounded-3xl p-8 border border-oc-gold/10 shadow-lg space-y-6 max-w-2xl mx-auto">
+                      <div className="space-y-2">
+                        <div className="w-12 h-12 rounded-2xl bg-oc-gold/10 flex items-center justify-center text-oc-gold">
+                          <Bell size={24} />
+                        </div>
+                        <h3 className="text-xl font-serif font-bold text-oc-navy dark:text-oc-gold-light">
+                          Dispatch Platform Broadcast
+                        </h3>
+                        <p className="text-xs text-gray-500">
+                          Send an instant notification message to all {Object.keys(users).length} registered member accounts.
+                        </p>
+                      </div>
+
+                      <form
+                        onSubmit={e => {
+                          e.preventDefault();
+                          if (!broadcastTitle || !broadcastMessage) {
+                            alert("Please enter both a title and message.");
+                            return;
+                          }
+                          broadcastNotification(broadcastTitle, broadcastMessage);
+                          alert(`Broadcast dispatched to ${Object.keys(users).length} users!`);
+                          setBroadcastTitle('');
+                          setBroadcastMessage('');
+                        }}
+                        className="space-y-4"
+                      >
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Notification Title</label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. Platform Update: Verified Member Badge Standards"
+                            value={broadcastTitle}
+                            onChange={e => setBroadcastTitle(e.target.value)}
+                            className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/15 rounded-xl p-3.5 text-xs outline-none text-oc-navy dark:text-white"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Message Content</label>
+                          <textarea
+                            required
+                            placeholder="Write the announcement or update to dispatch..."
+                            value={broadcastMessage}
+                            onChange={e => setBroadcastMessage(e.target.value)}
+                            className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/15 rounded-xl p-3.5 text-xs outline-none h-28 text-oc-navy dark:text-white"
+                          />
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-4 rounded-xl shadow-xl hover:scale-[1.01] transition-all text-xs flex items-center justify-center gap-2"
+                        >
+                          <Send size={16} /> Send Broadcast to All Members
+                        </button>
+                      </form>
+                    </div>
+                  )}
+                </div>
+                )
+              )}
+
+              {activePage === 'card' && currentUser && (
+                <div className="max-w-2xl mx-auto space-y-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-serif font-bold text-oc-navy dark:text-oc-gold-light italic">Identity Card</h2>
+                    {!isEditingProfile ? (
+                      <button 
+                        onClick={startEditing}
+                        className="flex items-center gap-2 px-4 py-2 bg-oc-gold/10 text-oc-gold rounded-xl text-xs font-bold hover:bg-oc-gold/20 transition-all border border-oc-gold/20"
+                      >
+                        <Settings size={14} />
+                        Edit Profile
+                      </button>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setIsEditingProfile(false)}
+                          className="px-4 py-2 text-gray-500 text-xs font-bold hover:text-oc-navy transition-all"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          onClick={handleSaveProfile}
+                          className="px-6 py-2 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy rounded-xl text-xs font-bold shadow-lg hover:scale-105 active:scale-95 transition-all"
+                        >
+                          Save Changes
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-white dark:bg-oc-navy border border-oc-gold/5 rounded-2xl overflow-hidden shadow-xl">
+                    <div className="h-24 bg-gradient-to-r from-oc-navy to-oc-navy-mid relative">
+                      <div className="absolute -bottom-12 left-8 p-1 bg-white dark:bg-oc-navy rounded-2xl border border-oc-gold/20 group relative overflow-hidden">
+                        <img 
+                          src={isEditingProfile ? (editForm.photo || editForm.logo || 'https://via.placeholder.com/100') : (currentUser.photo || currentUser.logo || 'https://via.placeholder.com/100')} 
+                          className="w-24 h-24 rounded-xl object-cover shadow-lg transition-all group-hover:opacity-75" 
+                          alt="Profile" 
+                        />
+                        {isEditingProfile && (
+                          <label className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 text-white opacity-0 group-hover:opacity-100 cursor-pointer transition-all">
+                            <Camera size={20} className="mb-1" />
+                            <span className="text-[10px] font-bold">Change</span>
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              className="hidden" 
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    const base64String = reader.result as string;
+                                    setEditForm({ ...editForm, photo: base64String, logo: base64String });
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                    <div className="pt-16 p-8">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                        <div className="flex-1">
+                          {isEditingProfile ? (
+                            <div className="space-y-4">
+                              <div>
+                                <label className="text-[10px] text-oc-gold uppercase font-bold tracking-wider mb-1 block">Full Name / Business Name</label>
+                                <input 
+                                  type="text"
+                                  className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl px-4 py-2 text-oc-navy dark:text-white font-bold outline-none focus:ring-1 focus:ring-oc-gold"
+                                  value={editForm.name || editForm.bizName}
+                                  onChange={e => setEditForm({...editForm, name: e.target.value, bizName: e.target.value})}
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <h3 className="text-2xl font-serif font-bold text-oc-navy dark:text-white">
+                                {currentUser.bizName || currentUser.name}
+                              </h3>
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                <Badge className="bg-oc-gold/10 text-oc-gold">{currentUser.role}</Badge>
+                                {currentUser.openToWork && <Badge className="bg-green-100 text-green-600">Open to Work</Badge>}
+                                <div className="flex items-center gap-1 text-oc-gold font-bold text-xs ml-2">
+                                  <Star size={12} fill="currentColor" />
+                                  <span>{calcRating(currentUser.ratings)}</span>
+                                  <span className="text-[10px] text-gray-400 font-normal">({currentUser.ratings?.length || 0})</span>
+                                </div>
+                                {currentUser.isVerified ? (
+                                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-600">
+                                    <CheckCircle size={10} /> Verified Member
+                                  </div>
+                                ) : currentUser.verificationPending ? (
+                                  <div className="flex flex-col items-start gap-1">
+                                    <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-oc-gold/10 text-oc-gold">
+                                      <Clock size={10} /> Verification Pending
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <button 
+                                    onClick={() => setShowProfileVerificationForm(true)}
+                                    className="text-[9px] font-bold text-gray-400 hover:text-oc-gold underline uppercase tracking-tighter"
+                                  >
+                                    Apply for Badge
+                                  </button>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        {!isEditingProfile && (
+                          <div className="bg-oc-cream dark:bg-white/5 py-2 px-4 rounded-xl text-center border border-oc-gold/10">
+                            <div className="text-xl font-bold">{currentUser.views}</div>
+                            <div className="text-[10px] text-gray-500 uppercase font-medium">Profile Views</div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-8 space-y-6">
+                        <div className="grid sm:grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <label className="text-[10px] text-oc-gold uppercase font-bold tracking-wider">Occupation</label>
+                            {isEditingProfile ? (
+                              <input 
+                                type="text"
+                                className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-oc-gold mt-1"
+                                value={editForm.occupation}
+                                onChange={e => setEditForm({...editForm, occupation: e.target.value})}
+                              />
+                            ) : (
+                              <p className="font-medium">{currentUser.occupation || 'Not specified'}</p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-oc-gold uppercase font-bold tracking-wider">Location</label>
+                            {isEditingProfile ? (
+                              <input 
+                                type="text"
+                                className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-oc-gold mt-1"
+                                value={editForm.location}
+                                onChange={e => setEditForm({...editForm, location: e.target.value})}
+                              />
+                            ) : (
+                              <p className="font-medium">{currentUser.location || 'Not specified'}</p>
+                            )}
+                          </div>
+                          {currentUser.role === 'BusinessOwner' && (
+                            <>
+                              <div>
+                                <label className="text-[10px] text-oc-gold uppercase font-bold tracking-wider">Industry</label>
+                                {isEditingProfile ? (
+                                  <input 
+                                    type="text"
+                                    className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-oc-gold mt-1"
+                                    value={editForm.industry}
+                                    onChange={e => setEditForm({...editForm, industry: e.target.value})}
+                                    placeholder="e.g. Technology, Retail"
+                                  />
+                                ) : (
+                                  <p className="font-medium">{currentUser.industry || 'Not specified'}</p>
+                                )}
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-oc-gold uppercase font-bold tracking-wider">Website</label>
+                                {isEditingProfile ? (
+                                  <input 
+                                    type="url"
+                                    className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-oc-gold mt-1"
+                                    value={editForm.website}
+                                    onChange={e => setEditForm({...editForm, website: e.target.value})}
+                                    placeholder="https://example.com"
+                                  />
+                                ) : (
+                                  <p className="font-medium">{currentUser.website || 'Not specified'}</p>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        
+                        <div className="pt-6 border-t border-oc-gold/5">
+                          <label className="text-[10px] text-oc-gold uppercase font-bold tracking-wider">About</label>
+                          {isEditingProfile ? (
+                            <textarea 
+                              className="w-full h-32 bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-oc-gold mt-1 resize-none"
+                              value={editForm.description}
+                              onChange={e => setEditForm({...editForm, description: e.target.value})}
+                              placeholder="Tell us about yourself or your business..."
+                            />
+                          ) : (
+                            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+                              {currentUser.description || 'No description provided yet.'}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="pt-6 border-t border-oc-gold/5">
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="text-[10px] text-oc-gold uppercase font-bold tracking-wider">Professional Resume / CV</label>
+                            {!isEditingProfile && currentUser.resumeContent && (
+                              <Badge className="bg-oc-navy/5 text-oc-navy dark:bg-white/5 dark:text-white-400 text-[8px]">Formal Document</Badge>
+                            )}
+                          </div>
+                          {isEditingProfile ? (
+                            <textarea 
+                              className="w-full h-48 bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-oc-gold mt-1 font-mono"
+                              value={editForm.resumeContent}
+                              onChange={e => setEditForm({...editForm, resumeContent: e.target.value})}
+                              placeholder="List your work experience, education, and skills in detail..."
+                            />
+                          ) : (
+                            <div className="mt-1 p-4 bg-oc-cream/30 dark:bg-white/5 rounded-xl border border-oc-gold/5">
+                              {currentUser.resumeContent ? (
+                                <p className="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap leading-relaxed italic">
+                                  {currentUser.resumeContent}
+                                </p>
+                              ) : (
+                                <p className="text-xs text-gray-400 italic">No resume content added yet. Add it by clicking Edit Profile.</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="pt-6 border-t border-oc-gold/5">
+                          <div className="flex items-center justify-between mb-4">
+                            <label className="text-[10px] text-oc-gold uppercase font-bold tracking-wider">Showcase Your Work (Portfolio)</label>
+                            <button 
+                              onClick={() => setIsAddingPortfolio(true)}
+                              className="bg-oc-gold text-oc-navy px-3 py-1 rounded-lg text-[10px] font-black uppercase text-oc-gold-shadow transition-all hover:scale-105"
+                            >
+                              + Add Item
+                            </button>
+                          </div>
+                          
+                          {isAddingPortfolio && (
+                            <div className="bg-oc-gold/5 p-4 rounded-xl border border-oc-gold/20 mb-4 space-y-3">
+                              <input 
+                                className="w-full bg-white dark:bg-white/5 border border-oc-gold/10 rounded-lg px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-oc-gold"
+                                placeholder="Project Title"
+                                value={newPortfolioItem.title}
+                                onChange={e => setNewPortfolioItem({...newPortfolioItem, title: e.target.value})}
+                              />
+                              <textarea 
+                                className="w-full bg-white dark:bg-white/5 border border-oc-gold/10 rounded-lg px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-oc-gold h-16 resize-none"
+                                placeholder="Short description..."
+                                value={newPortfolioItem.description}
+                                onChange={e => setNewPortfolioItem({...newPortfolioItem, description: e.target.value})}
+                              />
+                              <input 
+                                className="w-full bg-white dark:bg-white/5 border border-oc-gold/10 rounded-lg px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-oc-gold"
+                                placeholder="Link (optional)"
+                                value={newPortfolioItem.link}
+                                onChange={e => setNewPortfolioItem({...newPortfolioItem, link: e.target.value})}
+                              />
+                              <div className="flex items-center gap-2">
+                                <label className="flex-1 bg-white dark:bg-white/10 px-3 py-2 rounded-lg border border-dashed border-oc-gold/20 text-[10px] font-bold text-center cursor-pointer hover:bg-oc-gold/5 transition-all">
+                                  {newPortfolioItem.image ? '✓ Image Selected' : '📁 Upload Preview Image'}
+                                  <input 
+                                    type="file" 
+                                    className="hidden" 
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        const reader = new FileReader();
+                                        reader.onloadend = () => setNewPortfolioItem({...newPortfolioItem, image: reader.result as string});
+                                        reader.readAsDataURL(file);
+                                      }
+                                    }}
+                                  />
+                                </label>
+                                <button 
+                                  onClick={() => {
+                                    if (!newPortfolioItem.title) return;
+                                    const item = { ...newPortfolioItem, id: Date.now().toString() };
+                                    const updatedPortfolio = [...(currentUser.portfolio || []), item];
+                                    updateCurrentUser({ portfolio: updatedPortfolio });
+                                    setNewPortfolioItem({ title: '', description: '', link: '', image: '' });
+                                    setIsAddingPortfolio(false);
+                                  }}
+                                  className="bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy px-4 py-2 rounded-lg text-[10px] font-black uppercase"
+                                >
+                                  Save Item
+                                </button>
+                                <button 
+                                  onClick={() => setIsAddingPortfolio(false)}
+                                  className="text-gray-400 text-[10px] uppercase font-bold hover:text-red-400 px-2"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-3">
+                            {(currentUser.portfolio || []).map(p => (
+                              <div key={p.id} className="group relative rounded-xl overflow-hidden aspect-video bg-oc-navy border border-oc-gold/10">
+                                {p.image ? (
+                                  <img src={p.image} className="w-full h-full object-cover" alt="" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-oc-gold/20">
+                                    <LayoutGrid size={24} />
+                                  </div>
+                                )}
+                                <div className="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity p-2 flex flex-col justify-between">
+                                  <div className="text-[10px] font-bold text-white uppercase truncate">{p.title}</div>
+                                  <div className="flex justify-end gap-2">
+                                    <button 
+                                      onClick={() => {
+                                        const updated = (currentUser.portfolio || []).filter(item => item.id !== p.id);
+                                        updateCurrentUser({ portfolio: updated });
+                                      }}
+                                      className="p-1 px-2 bg-red-500/20 text-red-400 rounded-md text-[8px] font-black hover:bg-red-500 hover:text-white transition-all"
+                                    >
+                                      DELETE
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {currentUser.role === 'BusinessOwner' && (
+                          <div className="pt-6 border-t border-oc-gold/5">
+                            <div className="flex items-center justify-between mb-4">
+                              <label className="text-[10px] text-oc-gold uppercase font-bold tracking-wider">Company Management</label>
+                              <div className="flex bg-oc-cream dark:bg-white/5 p-1 rounded-lg border border-oc-gold/10">
+                                <button 
+                                  onClick={() => setHierarchyView('table')}
+                                  className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${hierarchyView === 'table' ? 'bg-oc-navy text-oc-gold' : 'text-gray-500'}`}
+                                >
+                                  LIST
+                                </button>
+                                <button 
+                                  onClick={() => setHierarchyView('chart')}
+                                  className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${hierarchyView === 'chart' ? 'bg-oc-navy text-oc-gold' : 'text-gray-500'}`}
+                                >
+                                  CHART
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="flex gap-2 mb-6">
+                              <input 
+                                type="email" 
+                                placeholder="Employee email address" 
+                                value={staffEmailInput}
+                                onChange={e => setStaffEmailInput(e.target.value)}
+                                className="flex-1 bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-oc-gold"
+                              />
+                              <button 
+                                onClick={addStaffMember}
+                                className="bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy px-4 py-2 rounded-xl text-sm font-bold shadow-md hover:scale-105 active:scale-95 transition-all"
+                              >
+                                Add
+                              </button>
+                            </div>
+
+                            <div className="space-y-3">
+                              {hierarchyView === 'table' ? (
+                                (currentUser.staff && currentUser.staff.length > 0) ? currentUser.staff.map(m => (
+                                  <div key={m.email} className="flex items-center justify-between bg-white dark:bg-white/5 p-4 rounded-2xl border border-oc-gold/5 shadow-sm">
+                                    <div className="min-w-0">
+                                      <div className="text-sm font-bold truncate">{m.name}</div>
+                                      <div className="text-[10px] text-gray-500 truncate">{m.email}</div>
+                                      <div className="mt-1 flex gap-1 items-center">
+                                        <Badge className="bg-oc-gold/10 text-oc-gold lowercase text-[9px]">{m.post || 'unassigned'}</Badge>
+                                      </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <button 
+                                        onClick={() => setAssigningStaff({ email: m.email, name: m.name })}
+                                        className="p-2 text-oc-gold hover:bg-oc-gold/10 rounded-lg transition-colors"
+                                        title="Assign Post"
+                                      >
+                                        <Briefcase size={16} />
+                                      </button>
+                                      <button 
+                                        onClick={() => removeStaffMember(m.email)}
+                                        className="p-2 text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                                        title="Remove Staff"
+                                      >
+                                        <Trash2 size={16} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                )) : (
+                                  <div className="text-center py-8 border-2 border-dashed border-oc-gold/10 rounded-2xl">
+                                    <Users className="mx-auto text-oc-gold/20 mb-2" size={32} />
+                                    <p className="text-xs text-gray-500">No staff members added yet</p>
+                                  </div>
+                                )
+                              ) : (
+                                <div className="p-8 bg-oc-navy-mid/30 rounded-3xl text-center border border-oc-gold/10 overflow-x-auto no-scrollbar shadow-inner">
+                                  <div className="inline-flex flex-col items-center">
+                                    <div className="relative">
+                                      <div className="bg-oc-gold text-oc-navy px-6 py-3 rounded-2xl font-black text-sm shadow-xl border-2 border-oc-gold/50 flex flex-col items-center gap-1">
+                                        <Building size={16} />
+                                        {currentUser.bizName}
+                                        <div className="text-[7px] opacity-70 tracking-widest font-black uppercase">Founder & CEO</div>
+                                      </div>
+                                      <div className="absolute top-1/2 -right-16 translate-y-[-50%] bg-oc-gold/10 px-2 py-1 rounded-lg border border-oc-gold/20 text-[8px] font-bold text-oc-gold whitespace-nowrap">
+                                        {currentUser.staff?.length || 0} Members
+                                      </div>
+                                    </div>
+                                    <div className="h-10 w-0.5 bg-gradient-to-b from-oc-gold/80 to-oc-gold/20" />
+                                    <div className="relative">
+                                      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[calc(100%-40px)] h-0.5 bg-oc-gold/20" />
+                                      <div className="flex gap-4 pt-4 px-4">
+                                        {(currentUser.staff || []).map(m => (
+                                          <div key={m.email} className="flex flex-col items-center min-w-[100px] relative">
+                                            <div className="absolute -top-4 left-1/2 -translate-x-1/2 h-4 w-0.5 bg-oc-gold/20" />
+                                            <div className="bg-white/5 border border-oc-gold/30 p-3 rounded-xl text-white shadow-lg backdrop-blur-sm group hover:border-oc-gold transition-all">
+                                              <div className="text-[10px] font-bold truncate max-w-[120px]">{m.name}</div>
+                                              <div className="text-[8px] text-oc-gold uppercase font-black tracking-tighter mt-1">{m.post || 'OFFICER'}</div>
+                                              <div className="mt-2 flex justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button 
+                                                  onClick={() => setAssigningStaff({ email: m.email, name: m.name })}
+                                                  className="p-1 px-2 bg-oc-gold/10 text-oc-gold rounded text-[7px] font-bold hover:bg-oc-gold hover:text-oc-navy"
+                                                >
+                                                  ROLE
+                                                </button>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        ))}
+                                        {(currentUser.staff || []).length === 0 && (
+                                          <div className="text-[10px] text-gray-500 italic py-4">No structural connections found. Add staff above to build your chart.</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <button 
+                        className="mt-8 w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/30 text-oc-navy dark:text-oc-gold-light font-bold py-3 rounded-xl hover:bg-oc-gold hover:text-white dark:hover:bg-oc-gold dark:hover:text-oc-navy transition-all flex items-center justify-center gap-2"
+                        onClick={() => setShowSetupModal(true)}
+                      >
+                        Edit Information
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </main>
+      </div>
+
+      {/* --- Modals --- */}
+      
+      {/* Profile Viewer */}
+      <AnimatePresence>
+        {viewingProfile && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setViewingProfile(null)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl overflow-hidden shadow-2xl border border-oc-gold/10"
+            >
+              <div className="h-32 bg-oc-navy-mid" />
+              <div className="px-8 pb-8 relative">
+                <div className="absolute -top-12 left-8 p-1 bg-white dark:bg-oc-navy rounded-2xl">
+                  <img src={viewingProfile.photo || viewingProfile.logo || 'https://via.placeholder.com/100'} className="w-24 h-24 rounded-xl object-cover shadow-lg" alt="" />
+                </div>
+                <div className="pt-16">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h3 className="text-2xl font-serif font-bold dark:text-white">{viewingProfile.bizName || viewingProfile.name}</h3>
+                      <div className="flex gap-2 mt-1">
+                        <Badge className="bg-oc-gold/10 text-oc-gold">{viewingProfile.role}</Badge>
+                        {viewingProfile.openToWork && <Badge className="bg-green-100 text-green-600">Open to Work</Badge>}
+                        <div className="flex items-center gap-1 text-oc-gold font-bold text-xs ml-2">
+                          <Star size={12} fill="currentColor" />
+                          <span>{calcRating(viewingProfile.ratings)}</span>
+                          <span className="text-[10px] text-gray-400 font-normal">({viewingProfile.ratings?.length || 0})</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Rating Section for others */}
+                  {currentUser && currentUser.email !== viewingProfile.email && (
+                    <div className="mt-6 p-4 bg-oc-cream/50 dark:bg-white/5 rounded-2xl border border-oc-gold/10">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] uppercase font-bold text-oc-gold tracking-widest">Rate Interaction</span>
+                        {viewingProfile.ratingVoters?.[currentUser.email] ? (
+                          <span className="text-[10px] text-gray-500 italic">You rated this {viewingProfile.ratingVoters[currentUser.email]} stars</span>
+                        ) : null}
+                      </div>
+                      <div className="flex gap-2">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            key={star}
+                            disabled={!!viewingProfile.ratingVoters?.[currentUser.email]}
+                            onClick={() => handleRateUser(viewingProfile.email, star)}
+                            className={`p-2 rounded-lg transition-all ${
+                              (viewingProfile.ratingVoters?.[currentUser.email] || 0) >= star
+                                ? 'text-oc-gold bg-oc-gold/10'
+                                : 'text-gray-300 hover:text-oc-gold hover:bg-oc-gold/5'
+                            } ${(viewingProfile.ratingVoters?.[currentUser.email]) ? 'cursor-default' : 'active:scale-90'}`}
+                          >
+                            <Star size={20} fill={(viewingProfile.ratingVoters?.[currentUser.email] || 0) >= star ? "currentColor" : "none"} />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-6 space-y-4 text-sm text-gray-600 dark:text-gray-400">
+                    {viewingProfile.description && <p className="leading-relaxed italic">"{viewingProfile.description}"</p>}
+                    <div className="grid grid-cols-2 gap-4">
+                      {viewingProfile.location && <div><span className="text-[10px] uppercase font-bold text-oc-gold block">Location</span>{viewingProfile.location}</div>}
+                      {viewingProfile.speciality && <div><span className="text-[10px] uppercase font-bold text-oc-gold block">Speciality</span>{viewingProfile.speciality}</div>}
+                    </div>
+                  </div>
+
+                  <div className="mt-8 flex flex-col sm:flex-row items-center gap-3">
+                    {currentUser && currentUser.email !== viewingProfile.email && (
+                      <button 
+                        onClick={() => {
+                          const target = viewingProfile;
+                          setViewingProfile(null);
+                          setBookingTarget(target);
+                          setBookingTopic('15-min Discovery Call');
+                          const tomorrow = new Date();
+                          tomorrow.setDate(tomorrow.getDate() + 1);
+                          setBookingDate(tomorrow.toISOString().split('T')[0]);
+                          setBookingTimeSlot('10:00 AM - 10:30 AM');
+                          setBookingNotes('');
+                        }}
+                        className="w-full sm:flex-1 bg-gradient-to-r from-oc-gold to-amber-500 text-oc-navy font-black py-3 px-4 rounded-xl transition-all shadow-lg hover:shadow-xl hover:scale-[1.02] flex items-center justify-center gap-2 text-sm"
+                      >
+                        <CalendarDays size={18} />
+                        Book Discovery Call
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => {
+                        if (currentUser) {
+                          setActivePage('messages');
+                          setActiveConversation(viewingProfile.email);
+                          markThreadAsRead(viewingProfile.email);
+                          setViewingProfile(null);
+                        }
+                      }}
+                      className="w-full sm:flex-1 bg-oc-navy text-white dark:bg-white/10 dark:text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm"
+                    >
+                      <MessageSquare size={18} />
+                      Send Message
+                    </button>
+                  </div>
+
+                  {/* Skills & Endorsements */}
+                  <div className="mt-8 pt-8 border-t border-oc-gold/5">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Award size={16} className="text-oc-gold" />
+                      <h4 className="text-xs uppercase font-bold tracking-widest text-oc-gold">Skills & Endorsements</h4>
+                    </div>
+                    <div className="space-y-3">
+                      {(viewingProfile.skills || 'Professionals Service').split(',').map(s => s.trim()).map(skill => {
+                        const endorsers = viewingProfile.skillEndorsements?.[skill] || [];
+                        const isEndorsed = endorsers.includes(currentUser?.email || '');
+                        return (
+                          <div key={skill} className="flex items-center justify-between p-3 bg-oc-cream/30 dark:bg-white/5 rounded-xl border border-oc-gold/5">
+                            <div>
+                              <div className="text-sm font-bold">{skill}</div>
+                              <div className="text-[10px] text-gray-500">{endorsers.length} Endorsers</div>
+                            </div>
+                            {currentUser && currentUser.email !== viewingProfile.email && (
+                              <button 
+                                onClick={() => handleEndorse(viewingProfile.email, skill)}
+                                className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all ${isEndorsed ? 'bg-oc-gold text-oc-navy shadow-inner' : 'bg-white dark:bg-white/10 text-oc-gold border border-oc-gold/20'}`}
+                              >
+                                {isEndorsed ? '✓ Endorsed' : '+ Endorse'}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Portfolio Section */}
+                  <div className="mt-8 pt-8 border-t border-oc-gold/5">
+                    <div className="flex items-center gap-2 mb-4">
+                      <LayoutGrid size={16} className="text-oc-gold" />
+                      <h4 className="text-xs uppercase font-bold tracking-widest text-oc-gold">Portfolio / Gallery</h4>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      {viewingProfile.portfolio && viewingProfile.portfolio.length > 0 ? viewingProfile.portfolio.map(p => (
+                        <div key={p.id} className="group relative rounded-xl overflow-hidden aspect-video bg-oc-navy border border-oc-gold/10">
+                          {p.image ? (
+                            <img src={p.image} className="w-full h-full object-cover transition-transform group-hover:scale-110" alt="" />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center text-oc-gold/20">
+                              <LayoutGrid size={24} />
+                              <span className="text-[10px] font-bold uppercase mt-1">Project</span>
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-end">
+                            <h5 className="text-[10px] font-bold text-white uppercase">{p.title}</h5>
+                            <p className="text-[8px] text-gray-300 line-clamp-1">{p.description}</p>
+                            {p.link && (
+                              <a href={p.link} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-oc-gold text-[8px] font-bold">
+                                <ExternalLink size={8} /> VIEW PROJECT
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      )) : (
+                        <div className="col-span-2 py-8 bg-oc-cream/20 dark:bg-white/5 rounded-xl border border-dashed border-oc-gold/10 text-center">
+                          <p className="text-xs text-gray-500 italic">No portfolio items shared yet.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <button className="absolute top-4 right-4 text-white/50 hover:text-white" onClick={() => setViewingProfile(null)}><X size={24} /></button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Role Selector Modal */}
+      <AnimatePresence>
+        {showRoleModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white dark:bg-oc-navy p-8 rounded-3xl w-full max-w-sm shadow-2xl border border-oc-gold/20 text-center">
+              <h2 className="text-2xl font-serif font-bold text-oc-navy dark:text-oc-gold-light mb-6">Choose Your Role</h2>
+              <div className="space-y-3">
+                {[
+                  { id: 'Employee', label: 'Employee', emoji: '👷' },
+                  { id: 'Employer', label: 'Employer', emoji: '💼' },
+                  { id: 'BusinessOwner', label: 'Business Owner', emoji: '🏢' },
+                ].map(r => (
+                  <button 
+                    key={r.id}
+                    onClick={() => selectRole(r.id as UserRole)}
+                    className="w-full flex items-center gap-4 bg-oc-cream dark:bg-white/5 p-4 rounded-2xl hover:bg-oc-gold hover:text-white transition-all text-left group"
+                  >
+                    <span className="text-2xl">{r.emoji}</span>
+                    <span className="font-bold">{r.label}</span>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Profile Setup Modal */}
+       <AnimatePresence>
+        {showSetupModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10 max-h-[90vh] overflow-y-auto"
+            >
+              <h2 className="text-2xl font-serif font-bold text-oc-navy dark:text-oc-gold-light mb-6">Setup Profile</h2>
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                const fd = new FormData(e.currentTarget);
+                const data = Object.fromEntries(fd.entries());
+                finalizeSetup(data);
+              }} className="space-y-4">
+                <input required name={roleSelection === 'BusinessOwner' ? 'bizName' : 'name'} placeholder={roleSelection === 'BusinessOwner' ? 'Business Name' : 'Full Name'} className="w-full bg-oc-cream dark:bg-white/5 border-none rounded-xl p-4 text-sm outline-none" />
+                <input name="location" placeholder="Location (Kampala, etc)" className="w-full bg-oc-cream dark:bg-white/5 border-none rounded-xl p-4 text-sm outline-none" />
+                <input name={roleSelection === 'BusinessOwner' ? 'speciality' : 'occupation'} placeholder={roleSelection === 'BusinessOwner' ? 'Business Type' : 'Current Occupation'} className="w-full bg-oc-cream dark:bg-white/5 border-none rounded-xl p-4 text-sm outline-none" />
+                {roleSelection === 'BusinessOwner' && (
+                  <>
+                    <input name="industry" placeholder="Industry (e.g. Finance, Tech)" className="w-full bg-oc-cream dark:bg-white/5 border-none rounded-xl p-4 text-sm outline-none" />
+                    <input name="website" type="url" placeholder="Website URL (https://...)" className="w-full bg-oc-cream dark:bg-white/5 border-none rounded-xl p-4 text-sm outline-none" />
+                  </>
+                )}
+                <textarea name="description" placeholder="Short bio or description" className="w-full bg-oc-cream dark:bg-white/5 border-none rounded-xl p-4 text-sm outline-none h-24" />
+                <button type="submit" className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-4 rounded-xl shadow-lg mt-4">
+                  Complete Setup
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Job Posting Modal */}
+      <AnimatePresence>
+        {showJobModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowJobModal(false)} />
+             <motion.div 
+               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+               className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10"
+             >
+               <h2 className="text-2xl font-serif font-bold mb-6">Post a Vacancy</h2>
+               <form onSubmit={(e) => {
+                 e.preventDefault();
+                 const fd = new FormData(e.currentTarget);
+                 const job: Job = {
+                   id: Date.now(),
+                   title: fd.get('title') as string,
+                   type: fd.get('type') as any,
+                   salary: fd.get('salary') as string,
+                   location: fd.get('location') as string,
+                   contact: fd.get('contact') as string,
+                   desc: fd.get('desc') as string,
+                   posterEmail: currentUser!.email,
+                   posterName: currentUser!.bizName || currentUser!.name!,
+                   posterRole: currentUser!.role!,
+                   time: new Date().toLocaleDateString()
+                 };
+                 addJob(job);
+                 setShowJobModal(false);
+               }} className="space-y-4">
+                 <input required name="title" placeholder="Job Title" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
+                 <div className="grid grid-cols-2 gap-4">
+                   <select name="type" className="bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none appearance-none">
+                     <option value="fulltime">Full-time</option>
+                     <option value="parttime">Part-time</option>
+                     <option value="remote">Remote</option>
+                     <option value="contract">Contract</option>
+                   </select>
+                   <input name="salary" placeholder="Salary (optional)" className="bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
+                 </div>
+                 <input required name="location" placeholder="Location" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
+                 <input required name="contact" placeholder="Email/Phone to apply" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
+                 <textarea required name="desc" placeholder="Job details..." className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none h-32" />
+                 <button className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-4 rounded-xl shadow-lg">Post Listing</button>
+               </form>
+             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Host Event Modal */}
+      <AnimatePresence>
+        {showAddEventModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowAddEventModal(false)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10"
+            >
+              <h2 className="text-2xl font-serif font-bold mb-6">Host Professional Event</h2>
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                setIsCreatingEvent(true);
+                const fd = new FormData(e.currentTarget);
+                let meetUri: string | undefined;
+                let meetCode: string | undefined;
+                if (eventIncludeMeet) {
+                  try {
+                    const space = await createGoogleMeetSpace();
+                    meetUri = space.meetingUri;
+                    meetCode = space.meetingCode;
+                  } catch (err) {
+                    console.warn('Could not generate Meet space for event:', err);
+                  }
+                }
+                const customLocation = fd.get('location') as string;
+                addEvent({
+                  title: fd.get('title') as string,
+                  type: fd.get('type') as any,
+                  date: fd.get('date') as string,
+                  location: customLocation || (meetUri ? 'Google Meet Video' : 'Online'),
+                  description: fd.get('description') as string,
+                  meetUri,
+                  meetCode
+                });
+                setIsCreatingEvent(false);
+                setShowAddEventModal(false);
+              }} className="space-y-4">
+                <input required name="title" placeholder="Event Title (e.g. UX Design Workshop)" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
+                <div className="grid grid-cols-2 gap-4">
+                  <select name="type" className="bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none appearance-none">
+                    <option value="Webinar">Webinar</option>
+                    <option value="Meetup">Meetup</option>
+                    <option value="Workshop">Workshop</option>
+                  </select>
+                  <input required name="date" placeholder="Date & Time (e.g. Oct 24, 4:00 PM)" className="bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
+                </div>
+                <input name="location" placeholder="Location / Venue (leave empty to use Google Meet)" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
+                <textarea required name="description" placeholder="What is this event about?" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none h-28" />
+                
+                <label className="flex items-center gap-3 p-3.5 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/50 dark:border-blue-800/30 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={eventIncludeMeet}
+                    onChange={(e) => setEventIncludeMeet(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <div className="text-xs">
+                    <div className="font-bold text-oc-navy dark:text-white flex items-center gap-1.5">
+                      <Video size={13} className="text-emerald-500" />
+                      <span>Generate Google Meet Video Room</span>
+                    </div>
+                    <div className="text-gray-500 text-[10px]">Creates an instant Google Meet link accessible to all attendees</div>
+                  </div>
+                </label>
+
+                <button 
+                  type="submit" 
+                  disabled={isCreatingEvent}
+                  className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2"
+                >
+                  {isCreatingEvent ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                      <span>Creating Event & Meet Room...</span>
+                    </>
+                  ) : (
+                    <span>Schedule Event</span>
+                  )}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Post Assignment Modal */}
+      <AnimatePresence>
+        {assigningStaff && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setAssigningStaff(null)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-sm bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10"
+            >
+              <h2 className="text-xl font-serif font-bold mb-1">Assign Post</h2>
+              <p className="text-xs text-gray-500 mb-6 font-medium">Setting role for {assigningStaff.name}</p>
+              
+              <div className="flex flex-wrap gap-2 mb-6">
+                {['Manager', 'Supervisor', 'Lead', 'Developer', 'Designer', 'Accounts', 'Sales', 'Intern'].map(p => (
+                  <button 
+                    key={p} 
+                    onClick={() => updateStaffPost(assigningStaff.email, p)}
+                    className="px-3 py-1.5 bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-full text-[10px] font-bold text-oc-navy dark:text-oc-gold-light hover:bg-oc-gold hover:text-white transition-all capitalize"
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+
+              <div className="space-y-4">
+                <input 
+                  type="text" 
+                  placeholder="Or type a custom post..." 
+                  className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl p-4 text-sm outline-none"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') updateStaffPost(assigningStaff.email, (e.target as HTMLInputElement).value);
+                  }}
+                />
+                <button 
+                  onClick={() => setAssigningStaff(null)}
+                  className="w-full py-3 text-sm font-bold text-gray-500 hover:text-oc-navy transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Job Application Modal */}
+      <AnimatePresence>
+        {applyingForJob && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !isApplying && setApplyingForJob(null)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10"
+            >
+              {!isApplying ? (
+                <>
+                  <h2 className="text-2xl font-serif font-bold mb-1 italic text-oc-navy dark:text-oc-gold-light tracking-tight">Confirm Application</h2>
+                  <p className="text-xs text-gray-500 mb-6 font-medium">You are applying for <span className="text-oc-navy dark:text-white font-bold">{applyingForJob.title}</span> at <span className="text-oc-navy dark:text-white font-bold">{applyingForJob.posterName}</span></p>
+                  
+                  <div className="space-y-6">
+                    <div className="bg-oc-cream dark:bg-white/5 p-4 rounded-2xl border border-oc-gold/10">
+                      <div className="flex items-center gap-3">
+                        {currentUser?.photo || currentUser?.logo ? (
+                          <img src={currentUser.photo || currentUser.logo} className="w-10 h-10 rounded-xl object-cover border border-oc-gold/20" alt="" />
+                        ) : (
+                          <UserCircle className="text-oc-gold" size={40} />
+                        )}
+                        <div>
+                          <div className="text-sm font-bold">{currentUser?.name || currentUser?.bizName}</div>
+                          <div className="text-[10px] text-gray-500 uppercase font-black tracking-widest">{currentUser?.occupation || currentUser?.role}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white dark:bg-white/10 p-4 rounded-2xl border border-oc-gold/5">
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          id="resume" 
+                          checked={attachResume} 
+                          onChange={e => setAttachResume(e.target.checked)}
+                          className="w-5 h-5 accent-oc-gold"
+                        />
+                        <label htmlFor="resume" className="text-sm font-medium cursor-pointer">
+                          Attach my professional profile (Resume)
+                        </label>
+                      </div>
+                      {attachResume && (
+                        <div className="mt-2 text-[10px] text-gray-500">
+                          Your profile details and CV will be shared. 
+                          <button 
+                            onClick={() => { setApplyingForJob(null); setActivePage('card'); }}
+                            className="text-oc-gold ml-1 hover:underline inline-flex items-center gap-0.5"
+                          >
+                            Edit Resume <Settings size={10} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex gap-4">
+                      <button 
+                        onClick={() => setApplyingForJob(null)}
+                        className="flex-1 py-4 text-sm font-bold text-gray-500 hover:text-oc-navy transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setIsApplying(true);
+                          setTimeout(() => {
+                            addNotificationTo(applyingForJob.posterEmail, {
+                              type: 'job',
+                              text: `New application: ${applyingForJob.title}`,
+                              sub: `Candidate: ${currentUser?.name || currentUser?.email}`
+                            });
+                            // Also send a formal message to the poster
+                            let applicationText = `Hello, I've just applied for the "${applyingForJob.title}" position. `;
+                            if (attachResume && currentUser?.resumeContent) {
+                              applicationText += `\n\n--- Shared Profile Summary ---\n${currentUser.resumeContent.slice(0, 300)}${currentUser.resumeContent.length > 300 ? '...' : ''}`;
+                            } else if (attachResume) {
+                              applicationText += `Please find my profile attached.`;
+                            }
+                            
+                            sendMessage(applyingForJob.posterEmail, applicationText);
+                            createJobApplication(applyingForJob);
+                            
+                            setIsApplying(false);
+                            setApplyingForJob(null);
+                            addNotificationTo(currentUser!.email, {
+                              type: 'account',
+                              text: `Application Sent!`,
+                              sub: `Successfully applied to ${applyingForJob.posterName}`
+                            });
+                          }, 1500);
+                        }}
+                        className="flex-1 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-4 rounded-2xl shadow-lg hover:scale-105 active:scale-95 transition-all"
+                      >
+                        Submit 
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="py-12 text-center space-y-6">
+                  <motion.div 
+                    animate={{ rotate: 360 }}
+                    transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+                    className="w-16 h-16 border-4 border-oc-gold border-t-transparent rounded-full mx-auto"
+                  />
+                  <div>
+                    <h3 className="text-xl font-serif font-bold">Submitting Application...</h3>
+                    <p className="text-sm text-gray-500">Preparing your credentials for {applyingForJob.posterName}</p>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Profile Verification Modal */}
+      <AnimatePresence>
+        {showProfileVerificationForm && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowProfileVerificationForm(false)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10 z-10"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-oc-gold/10 rounded-2xl flex items-center justify-center text-oc-gold">
+                    <ShieldCheck size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-serif font-bold text-oc-navy dark:text-oc-gold-light tracking-tight">Identity Verification</h2>
+                    <p className="text-xs text-gray-500 font-medium">Optional • Apply for a Verified Badge</p>
+                  </div>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => setShowProfileVerificationForm(false)}
+                  className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-white rounded-full transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="mb-5 p-3 bg-oc-gold/5 border border-oc-gold/10 rounded-2xl text-[11px] text-oc-navy/80 dark:text-gray-300 flex items-center gap-2">
+                <Sparkles size={16} className="text-oc-gold shrink-0" />
+                <span>Verification is <strong>100% optional</strong>. It adds a trust badge to your profile for employers & clients.</span>
+              </div>
+
+              {verificationFeedback && (
+                <div className={`mb-5 p-3.5 rounded-2xl text-xs flex items-center gap-2 border ${
+                  verificationFeedback.type === 'success' 
+                    ? 'bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400'
+                    : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400'
+                }`}>
+                  {verificationFeedback.type === 'success' ? <CheckCircle size={18} className="shrink-0" /> : <AlertCircle size={18} className="shrink-0" />}
+                  <span>{verificationFeedback.message}</span>
+                </div>
+              )}
+
+              {!isVerifyingAI ? (
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const fd = new FormData(e.currentTarget);
+                  const docType = fd.get('docType') as string;
+                  const fileInput = e.currentTarget.querySelector('input[type="file"]') as HTMLInputElement;
+                  const file = fileInput?.files?.[0];
+                  
+                  if (!file) {
+                    alert("Please select or capture a document image.");
+                    return;
+                  }
+
+                  const reader = new FileReader();
+                  reader.onloadend = () => {
+                    requestVerification(reader.result as string, docType);
+                  };
+                  reader.readAsDataURL(file);
+                }} className="space-y-5">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Document Type</label>
+                    <select name="docType" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-3.5 text-sm outline-none border border-oc-gold/10 text-oc-navy dark:text-white">
+                      <option value="National ID">National ID Card</option>
+                      <option value="Passport">Passport</option>
+                      <option value="Driver License">Driver's License</option>
+                      <option value="Business License">Business License / Registration</option>
+                      <option value="Professional Certification">Professional Certificate</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Upload Document Photo</label>
+                    <div className="border-2 border-dashed border-oc-gold/20 rounded-2xl p-6 text-center bg-oc-gold/5 group hover:bg-oc-gold/10 transition-all cursor-pointer relative">
+                      <input required type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" />
+                      <FileBadge className="mx-auto text-oc-gold/40 mb-2 group-hover:scale-110 transition-transform" size={40} />
+                      <p className="text-xs font-bold text-oc-gold">Tap to upload or take photo</p>
+                      <p className="text-[9px] text-gray-400 mt-1 uppercase">JPEG, PNG, WEBP (National ID / Passport)</p>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-blue-50 dark:bg-blue-900/10 rounded-2xl border border-blue-100 dark:border-blue-800/50 flex gap-2.5">
+                    <ShieldCheck size={16} className="text-blue-500 shrink-0 mt-0.5" />
+                    <p className="text-[10px] leading-relaxed text-blue-700 dark:text-blue-300">
+                      Document analysis is powered by Gemini AI for instant document validation. Your image is processed securely.
+                    </p>
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button 
+                      type="button"
+                      onClick={() => setShowProfileVerificationForm(false)}
+                      className="flex-1 py-3 text-xs font-bold text-gray-500 hover:text-oc-navy dark:hover:text-white transition-colors"
+                    >
+                      Skip for Now
+                    </button>
+                    <button 
+                      type="submit"
+                      className="flex-1 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-3 rounded-xl shadow-lg hover:opacity-90 transition-all text-xs"
+                    >
+                      Verify Document with AI
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="py-10 text-center space-y-5">
+                  <motion.div 
+                    animate={{ rotate: 360 }}
+                    transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+                    className="w-16 h-16 border-4 border-oc-gold border-t-transparent border-r-transparent rounded-full mx-auto flex items-center justify-center"
+                  >
+                    <ShieldCheck className="text-oc-gold" size={28} />
+                  </motion.div>
+                  <div className="space-y-1">
+                    <h3 className="text-lg font-serif font-bold animate-pulse">AI Verification in Progress</h3>
+                    <p className="text-xs text-gray-500 max-w-[220px] mx-auto">Gemini AI is examining your document for authenticity and readability...</p>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Appointment / Discovery Call Booking Modal */}
+      <AnimatePresence>
+        {bookingTarget && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }} 
+              className="absolute inset-0 bg-black/70 backdrop-blur-md" 
+              onClick={() => { setBookingTarget(null); setBookingSuccess(null); }} 
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }} 
+              animate={{ scale: 1, opacity: 1, y: 0 }} 
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/20 max-h-[90vh] overflow-y-auto"
+            >
+              {!bookingSuccess ? (
+                <>
+                  <div className="flex items-center justify-between pb-4 mb-6 border-b border-oc-gold/10">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-oc-gold/10 rounded-2xl flex items-center justify-center text-oc-gold border border-oc-gold/20">
+                        <CalendarDays size={24} />
+                      </div>
+                      <div>
+                        <h2 className="text-xl font-serif font-bold text-oc-navy dark:text-oc-gold-light">
+                          Book Discovery Call
+                        </h2>
+                        <p className="text-xs text-gray-500">
+                          Schedule a meeting with <span className="text-oc-gold font-bold">{bookingTarget.bizName || bookingTarget.name || bookingTarget.email}</span>
+                        </p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setBookingTarget(null)} 
+                      className="text-gray-400 hover:text-oc-navy dark:hover:text-white p-2"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  {/* Target Summary Card */}
+                  <div className="bg-oc-cream/50 dark:bg-white/5 p-4 rounded-2xl border border-oc-gold/10 flex items-center gap-4 mb-6">
+                    <img 
+                      src={bookingTarget.photo || bookingTarget.logo || 'https://via.placeholder.com/48'} 
+                      className="w-12 h-12 rounded-xl object-cover border border-oc-gold/20" 
+                      alt="" 
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-sm text-oc-navy dark:text-white truncate">
+                        {bookingTarget.bizName || bookingTarget.name}
+                      </div>
+                      <div className="text-xs text-gray-500 truncate">
+                        {bookingTarget.speciality || bookingTarget.occupation || bookingTarget.role}
+                      </div>
+                    </div>
+                    <Badge className="bg-oc-gold/10 text-oc-gold shrink-0">
+                      {bookingTarget.role}
+                    </Badge>
+                  </div>
+
+                  <form 
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      setIsBookingLoading(true);
+                      let meetUri: string | undefined;
+                      let meetCode: string | undefined;
+                      if (bookingIncludeMeet) {
+                        try {
+                          const space = await createGoogleMeetSpace();
+                          meetUri = space.meetingUri;
+                          meetCode = space.meetingCode;
+                        } catch (err) {
+                          console.warn('Could not generate Google Meet space:', err);
+                        }
+                      }
+                      const appt = bookAppointment({
+                        hostEmail: bookingTarget.email,
+                        hostName: bookingTarget.bizName || bookingTarget.name || bookingTarget.email,
+                        topic: bookingTopic,
+                        date: bookingDate || new Date(Date.now() + 86400000).toISOString().split('T')[0],
+                        timeSlot: bookingTimeSlot,
+                        notes: bookingNotes,
+                        meetUri,
+                        meetCode
+                      });
+                      setIsBookingLoading(false);
+                      setBookingSuccess(appt);
+                    }} 
+                    className="space-y-5"
+                  >
+                    {/* Meeting Topic / Purpose */}
+                    <div>
+                      <label className="block text-xs font-extrabold uppercase tracking-widest text-oc-gold mb-2">
+                        Select Call Purpose
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          '15-min Discovery Call',
+                          '30-min Consultation',
+                          'Business Partnership',
+                          'Career & Hiring Inquiry'
+                        ].map(topic => (
+                          <button
+                            key={topic}
+                            type="button"
+                            onClick={() => setBookingTopic(topic)}
+                            className={`p-3 rounded-xl text-left text-xs font-bold transition-all border ${
+                              bookingTopic === topic 
+                                ? 'bg-oc-navy text-oc-gold border-oc-gold dark:bg-oc-gold dark:text-oc-navy shadow-md' 
+                                : 'bg-oc-cream/40 dark:bg-white/5 border-oc-gold/10 hover:border-oc-gold/30 text-gray-700 dark:text-gray-300'
+                            }`}
+                          >
+                            {topic}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Date Selection */}
+                    <div>
+                      <label className="block text-xs font-extrabold uppercase tracking-widest text-oc-gold mb-2">
+                        Select Date
+                      </label>
+                      <div className="space-y-2">
+                        <input 
+                          type="date" 
+                          required
+                          min={new Date().toISOString().split('T')[0]}
+                          value={bookingDate}
+                          onChange={(e) => setBookingDate(e.target.value)}
+                          className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/15 rounded-xl p-3.5 text-sm outline-none focus:ring-2 focus:ring-oc-gold text-oc-navy dark:text-white"
+                        />
+                        {/* Quick Day Chips */}
+                        <div className="flex gap-2">
+                          {[
+                            { label: 'Tomorrow', daysToAdd: 1 },
+                            { label: 'In 2 Days', daysToAdd: 2 },
+                            { label: 'In 3 Days', daysToAdd: 3 },
+                          ].map(btn => {
+                            const d = new Date();
+                            d.setDate(d.getDate() + btn.daysToAdd);
+                            const dateStr = d.toISOString().split('T')[0];
+                            const isSel = bookingDate === dateStr;
+                            return (
+                              <button
+                                key={btn.label}
+                                type="button"
+                                onClick={() => setBookingDate(dateStr)}
+                                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                                  isSel ? 'bg-oc-gold text-oc-navy' : 'bg-oc-gold/10 text-oc-gold hover:bg-oc-gold/20'
+                                }`}
+                              >
+                                {btn.label} ({d.toLocaleDateString([], { month: 'short', day: 'numeric' })})
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Time Slot Selection */}
+                    <div>
+                      <label className="block text-xs font-extrabold uppercase tracking-widest text-oc-gold mb-2">
+                        Select Time Slot
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {[
+                          '09:00 AM - 09:30 AM',
+                          '10:00 AM - 10:30 AM',
+                          '11:30 AM - 12:00 PM',
+                          '02:00 PM - 02:30 PM',
+                          '03:30 PM - 04:00 PM',
+                          '05:00 PM - 05:30 PM'
+                        ].map(slot => (
+                          <button
+                            key={slot}
+                            type="button"
+                            onClick={() => setBookingTimeSlot(slot)}
+                            className={`p-2.5 rounded-xl text-center text-xs font-bold transition-all border ${
+                              bookingTimeSlot === slot 
+                                ? 'bg-oc-gold text-oc-navy border-oc-gold shadow-md font-extrabold' 
+                                : 'bg-oc-cream/30 dark:bg-white/5 border-oc-gold/10 hover:border-oc-gold/30 text-gray-700 dark:text-gray-300'
+                            }`}
+                          >
+                            <Clock size={12} className="inline mr-1 opacity-70" />
+                            {slot.split(' - ')[0]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Notes */}
+                    <div>
+                      <label className="block text-xs font-extrabold uppercase tracking-widest text-oc-gold mb-2">
+                        Meeting Notes / Agenda (Optional)
+                      </label>
+                      <textarea
+                        placeholder="Share any topics or context you want to cover..."
+                        value={bookingNotes}
+                        onChange={(e) => setBookingNotes(e.target.value)}
+                        className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/15 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-oc-gold h-20 text-oc-navy dark:text-white placeholder-gray-400"
+                      />
+                    </div>
+
+                    {/* Google Meet Toggle */}
+                    <label className="flex items-center gap-3 p-3.5 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/50 dark:border-blue-800/30 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={bookingIncludeMeet}
+                        onChange={(e) => setBookingIncludeMeet(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 rounded"
+                      />
+                      <div className="text-xs">
+                        <div className="font-bold text-oc-navy dark:text-white flex items-center gap-1.5">
+                          <Video size={13} className="text-emerald-500" />
+                          <span>Attach Google Meet Conference Space</span>
+                        </div>
+                        <div className="text-gray-500 text-[10px]">Automatically creates a secure video room for this call</div>
+                      </div>
+                    </label>
+
+                    <div className="pt-2 flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setBookingTarget(null)}
+                        className="flex-1 py-3 text-xs font-bold text-gray-400 hover:text-gray-600 dark:hover:text-white"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isBookingLoading}
+                        className="flex-[2] bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-black py-3.5 rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all text-xs flex items-center justify-center gap-2"
+                      >
+                        {isBookingLoading ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                            <span>Booking & Generating Meet...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CalendarDays size={16} />
+                            <span>Confirm & Book Call</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </>
+              ) : (
+                <div className="py-6 text-center space-y-6">
+                  <motion.div 
+                    initial={{ scale: 0 }} 
+                    animate={{ scale: 1 }} 
+                    className="w-20 h-20 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full mx-auto flex items-center justify-center shadow-lg"
+                  >
+                    <CheckCircle size={48} />
+                  </motion.div>
+                  <div className="space-y-2">
+                    <h3 className="text-2xl font-serif font-bold text-oc-navy dark:text-oc-gold-light">
+                      Discovery Call Scheduled!
+                    </h3>
+                    <p className="text-xs text-gray-500 max-w-sm mx-auto">
+                      A meeting request has been dispatched to <span className="font-bold text-oc-navy dark:text-white">{bookingSuccess.hostName}</span>. Details have also been saved to your chat messages.
+                    </p>
+                  </div>
+
+                  <div className="bg-oc-cream/80 dark:bg-white/5 p-4 rounded-2xl border border-oc-gold/20 text-left space-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400 uppercase font-bold">Topic:</span>
+                      <span className="font-bold">{bookingSuccess.topic}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400 uppercase font-bold">Date:</span>
+                      <span className="font-bold">{bookingSuccess.date}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400 uppercase font-bold">Time Slot:</span>
+                      <span className="font-bold">{bookingSuccess.timeSlot}</span>
+                    </div>
+                    {bookingSuccess.meetUri && (
+                      <div className="pt-2 border-t border-oc-gold/10">
+                        <div className="text-[10px] text-gray-400 uppercase font-bold mb-1">Google Meet Video:</div>
+                        <a
+                          href={bookingSuccess.meetUri}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white font-bold rounded-lg text-xs shadow"
+                        >
+                          <Video size={13} />
+                          <span>Join Google Meet Video</span>
+                          <ExternalLink size={12} />
+                        </a>
+                      </div>
+                    )}
+                    <div className="flex justify-between pt-1">
+                      <span className="text-gray-400 uppercase font-bold">Status:</span>
+                      <Badge className="bg-green-100 text-green-700">Scheduled</Badge>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      onClick={() => {
+                        const targetEmail = bookingSuccess.hostEmail;
+                        setBookingTarget(null);
+                        setBookingSuccess(null);
+                        setActivePage('messages');
+                        setActiveConversation(targetEmail);
+                      }}
+                      className="flex-1 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-3.5 rounded-2xl text-xs shadow-md flex items-center justify-center gap-2"
+                    >
+                      <MessageSquare size={16} />
+                      Open Chat Thread
+                    </button>
+                    <button
+                      onClick={() => {
+                        setBookingTarget(null);
+                        setBookingSuccess(null);
+                      }}
+                      className="flex-1 bg-oc-cream dark:bg-white/10 text-gray-700 dark:text-white font-bold py-3.5 rounded-2xl text-xs hover:bg-oc-gold/20"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* My Scheduled Meetings / Discovery Calls Modal */}
+      <AnimatePresence>
+        {showMyBookingsModal && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }} 
+              className="absolute inset-0 bg-black/70 backdrop-blur-md" 
+              onClick={() => setShowMyBookingsModal(false)} 
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-2xl bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/20 max-h-[85vh] overflow-y-auto"
+            >
+              <div className="flex items-center justify-between pb-4 mb-6 border-b border-oc-gold/10">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-oc-gold/10 rounded-xl flex items-center justify-center text-oc-gold">
+                    <CalendarDays size={22} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-serif font-bold text-oc-navy dark:text-oc-gold-light">
+                      Discovery Calls & Bookings
+                    </h2>
+                    <p className="text-xs text-gray-500">
+                      Manage your scheduled 1-on-1 calls and meetings
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setShowMyBookingsModal(false)} className="text-gray-400 hover:text-white p-2">
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Bookings List */}
+              {appointments.filter(a => a.hostEmail === currentUser?.email || a.bookerEmail === currentUser?.email).length > 0 ? (
+                <div className="space-y-4">
+                  {appointments
+                    .filter(a => a.hostEmail === currentUser?.email || a.bookerEmail === currentUser?.email)
+                    .map(appt => {
+                      const isHost = appt.hostEmail === currentUser?.email;
+                      const otherPartyEmail = isHost ? appt.bookerEmail : appt.hostEmail;
+                      const otherPartyName = isHost ? appt.bookerName : appt.hostName;
+
+                      return (
+                        <div key={appt.id} className="p-4 bg-oc-cream/40 dark:bg-white/5 rounded-2xl border border-oc-gold/10 hover:border-oc-gold/30 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-2">
+                              <Badge className={isHost ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" : "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300"}>
+                                {isHost ? 'Host' : 'Booker'}
+                              </Badge>
+                              <Badge className={appt.status === 'Scheduled' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}>
+                                {appt.status}
+                              </Badge>
+                              <span className="text-xs font-extrabold text-oc-navy dark:text-white">{appt.topic}</span>
+                            </div>
+                            <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-2">
+                              <Users size={14} className="text-oc-gold" />
+                              <span>With: <strong className="text-oc-navy dark:text-white">{otherPartyName}</strong> ({otherPartyEmail})</span>
+                            </div>
+                            <div className="text-xs text-gray-500 flex items-center gap-3">
+                              <span className="flex items-center gap-1"><Calendar size={12} className="text-oc-gold" /> {appt.date}</span>
+                              <span className="flex items-center gap-1"><Clock size={12} className="text-oc-gold" /> {appt.timeSlot}</span>
+                            </div>
+                            {appt.notes && (
+                              <div className="text-[11px] text-gray-400 italic bg-black/5 dark:bg-white/5 p-2 rounded-lg mt-1">
+                                "{appt.notes}"
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
+                            {appt.meetUri && appt.status === 'Scheduled' && (
+                              <a
+                                href={appt.meetUri}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white rounded-xl text-xs font-black hover:scale-105 transition-all flex items-center gap-1.5 shadow-md"
+                              >
+                                <Video size={14} />
+                                <span>Join Meet</span>
+                                <ExternalLink size={12} />
+                              </a>
+                            )}
+                            <button
+                              onClick={() => {
+                                setShowMyBookingsModal(false);
+                                setActivePage('messages');
+                                setActiveConversation(otherPartyEmail);
+                              }}
+                              className="px-3.5 py-2 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy rounded-xl text-xs font-bold hover:scale-105 transition-all flex items-center gap-1.5"
+                            >
+                              <MessageSquare size={14} />
+                              Chat
+                            </button>
+                            {appt.status === 'Scheduled' && (
+                              <button
+                                onClick={() => cancelAppointment(appt.id)}
+                                className="px-3 py-2 bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 rounded-xl text-xs font-bold transition-all"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              ) : (
+                <div className="text-center py-12 bg-oc-cream/20 dark:bg-white/5 rounded-2xl border border-dashed border-oc-gold/15">
+                  <CalendarDays size={48} className="mx-auto text-oc-gold/30 mb-3" />
+                  <h3 className="text-base font-bold text-gray-500">No Calls or Meetings Booked Yet</h3>
+                  <p className="text-xs text-gray-400 mt-1 max-w-xs mx-auto">
+                    You can book discovery calls directly from any business or employee card in the network!
+                  </p>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Admin Document Preview Modal */}
+      <AnimatePresence>
+        {adminDocPreview && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/75 backdrop-blur-md" onClick={() => setAdminDocPreview(null)} />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 0 }}
+              className="relative w-full max-w-3xl bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/20 overflow-hidden z-10 max-h-[90vh] flex flex-col justify-between"
+            >
+              <div className="flex items-center justify-between border-b border-oc-gold/10 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-oc-gold/10 flex items-center justify-center text-oc-gold font-serif font-bold text-base">
+                    {(adminDocPreview.user.name || adminDocPreview.user.email).charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-serif font-bold text-oc-navy dark:text-oc-gold-light">
+                      Identity Document Inspection
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      {adminDocPreview.user.name || adminDocPreview.user.email} • {adminDocPreview.user.verificationType || 'National Document'}
+                    </p>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => setAdminDocPreview(null)}
+                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-white/10 text-gray-400"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Image viewer */}
+              <div className="my-4 flex-1 bg-black/90 rounded-2xl p-4 flex items-center justify-center overflow-hidden border border-oc-gold/20 max-h-[50vh]">
+                {adminDocPreview.user.verificationDoc ? (
+                  <img
+                    src={adminDocPreview.user.verificationDoc}
+                    alt="Document"
+                    className="max-w-full max-h-full object-contain rounded-lg shadow-lg"
+                  />
+                ) : (
+                  <div className="text-gray-400 text-xs italic">No document image available</div>
+                )}
+              </div>
+
+              {/* Modal footer controls */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 border-t border-oc-gold/10">
+                <div className="text-xs text-gray-500">
+                  User email: <span className="font-bold text-oc-navy dark:text-white">{adminDocPreview.user.email}</span>
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  {!adminDocPreview.user.isVerified ? (
+                    <>
+                      <button
+                        onClick={() => {
+                          toggleUserVerified(adminDocPreview.user.email, true, 'Approved after document inspection');
+                          setAdminDocPreview(null);
+                        }}
+                        className="flex-1 sm:flex-none px-5 py-2.5 bg-green-600 text-white rounded-xl text-xs font-bold shadow hover:bg-green-700 transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Check size={16} /> Approve & Grant Verified Badge
+                      </button>
+                      <button
+                        onClick={() => {
+                          const target = adminDocPreview.user;
+                          setAdminDocPreview(null);
+                          setDeclineReasonModal({ email: target.email, name: target.name || target.email });
+                          setDeclineReasonInput('');
+                        }}
+                        className="flex-1 sm:flex-none px-5 py-2.5 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <X size={16} /> Decline
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        toggleUserVerified(adminDocPreview.user.email, false, 'Revoked by admin');
+                        setAdminDocPreview(null);
+                      }}
+                      className="w-full sm:w-auto px-5 py-2.5 bg-red-500/10 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold transition-all"
+                    >
+                      Revoke Badge
+                    </button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Decline Reason Modal */}
+      <AnimatePresence>
+        {declineReasonModal && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDeclineReasonModal(null)} />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-6 shadow-2xl border border-oc-gold/20 space-y-5 z-10"
+            >
+              <div className="flex items-center justify-between border-b border-oc-gold/10 pb-3">
+                <h3 className="text-base font-serif font-bold text-oc-navy dark:text-oc-gold-light">
+                  Decline Verification Request
+                </h3>
+                <button onClick={() => setDeclineReasonModal(null)} className="text-gray-400 hover:text-white">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p className="text-xs text-gray-500">
+                Please enter feedback for <strong className="text-oc-navy dark:text-white">{declineReasonModal.name}</strong> explaining why the identity document was declined.
+              </p>
+
+              <textarea
+                value={declineReasonInput}
+                onChange={e => setDeclineReasonInput(e.target.value)}
+                placeholder="e.g. Document image was blurred, or ID name does not match profile name."
+                className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/15 rounded-xl p-3 text-xs outline-none text-oc-navy dark:text-white h-24"
+              />
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeclineReasonModal(null)}
+                  className="flex-1 py-2.5 text-xs font-bold text-gray-500 hover:text-oc-navy dark:hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const reason = declineReasonInput.trim() || 'Document verification declined by administrator.';
+                    toggleUserVerified(declineReasonModal.email, false, reason);
+                    setDeclineReasonModal(null);
+                  }}
+                  className="flex-1 bg-red-600 text-white font-bold py-2.5 rounded-xl text-xs shadow hover:bg-red-700 transition-all"
+                >
+                  Decline Request
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Google Meet Hub Modal */}
+      {currentUser && (
+        <GoogleMeetHubModal
+          isOpen={showMeetHubModal}
+          onClose={() => setShowMeetHubModal(false)}
+          currentUser={currentUser}
+          users={users}
+          appointments={appointments}
+          applications={applications}
+          events={events}
+          onSendMessage={(toEmail, text) => {
+            sendMessage(toEmail, text);
+          }}
+          onOpenChat={(toEmail) => {
+            setActivePage('messages');
+            setActiveConversation(toEmail);
+          }}
+        />
+      )}
+
+      {/* Schedule Interview Modal with Google Meet */}
+      {currentUser && (
+        <ScheduleInterviewModal
+          application={schedulingInterviewForApp}
+          onClose={() => setSchedulingInterviewForApp(null)}
+          currentUser={currentUser}
+          onScheduleComplete={(appId, interviewDate, interviewTime, meetUri, meetCode) => {
+            updateApplication(appId, {
+              status: 'Interview Scheduled',
+              interviewDate,
+              interviewTime,
+              meetUri,
+              meetCode
+            });
+            if (schedulingInterviewForApp) {
+              const msg = `📅 Interview Invitation: You have been scheduled for an interview for "${schedulingInterviewForApp.jobTitle}" on ${interviewDate} at ${interviewTime}.${meetUri ? ` Join Google Meet Video: ${meetUri}` : ''}`;
+              sendMessage(schedulingInterviewForApp.applicantEmail, msg);
+            }
+            setSchedulingInterviewForApp(null);
+          }}
+        />
+      )}
+
+      {/* Chat Start Meet Confirmation Modal (Explicit confirmation dialog before generating meeting space) */}
+      <AnimatePresence>
+        {chatMeetConfirmModal && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }} 
+              className="absolute inset-0 bg-black/70 backdrop-blur-md" 
+              onClick={() => !isCreatingChatMeet && setChatMeetConfirmModal(null)} 
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 0 }}
+              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/20 z-10 space-y-5"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                  <Video size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-serif font-bold text-oc-navy dark:text-oc-gold-light">
+                    Start Google Meet Video Call?
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    With {chatMeetConfirmModal.targetName}
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-blue-50/50 dark:bg-blue-950/20 rounded-2xl border border-blue-200/50 dark:border-blue-800/30 text-xs text-gray-600 dark:text-gray-300 space-y-2">
+                <p>
+                  This will generate a Google Meet video conference link using Google Workspace Meet REST API and post the invite directly into your chat conversation.
+                </p>
+                <div className="text-[11px] text-gray-400 flex items-center gap-1.5">
+                  <Video size={12} className="text-emerald-500" />
+                  <span>Both participants can join instantly with one click.</span>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isCreatingChatMeet}
+                  onClick={() => setChatMeetConfirmModal(null)}
+                  className="flex-1 py-3 text-xs font-bold text-gray-500 hover:text-oc-navy dark:hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isCreatingChatMeet}
+                  onClick={async () => {
+                    if (!chatMeetConfirmModal) return;
+                    setIsCreatingChatMeet(true);
+                    try {
+                      const space = await createGoogleMeetSpace();
+                      const message = `📹 I've started a Google Meet video conference. Join here: ${space.meetingUri}`;
+                      sendMessage(chatMeetConfirmModal.targetEmail, message);
+                      setChatMeetConfirmModal(null);
+                    } catch (err: any) {
+                      console.error('Failed to create chat Meet room:', err);
+                    } finally {
+                      setIsCreatingChatMeet(false);
+                    }
+                  }}
+                  className="flex-[2] bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white font-bold py-3.5 rounded-2xl text-xs shadow-lg flex items-center justify-center gap-2"
+                >
+                  {isCreatingChatMeet ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                      <span>Creating Space...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Video size={15} />
+                      <span>Create & Send Call Link</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

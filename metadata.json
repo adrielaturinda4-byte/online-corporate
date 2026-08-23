@@ -1,0 +1,8 @@
+{
+  "name": "Online Corporate",
+  "description": "A premier professional networking platform for employees, employers, and business owners in Uganda and beyond.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

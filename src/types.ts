@@ -1,6 +1,6 @@
 export type UserRole = 'Employee' | 'Employer' | 'BusinessOwner';
 
-export type ApplicationStatus = 'Applied' | 'Under Review' | 'Interviewing' | 'Interview Scheduled' | 'Offered' | 'Rejected';
+export type ApplicationStatus = 'Applied' | 'Under Review' | 'Interviewing' | 'Offered' | 'Rejected';
 
 export interface JobApplication {
   id: string;
@@ -13,10 +13,6 @@ export interface JobApplication {
   status: ApplicationStatus;
   appliedAt: number;
   updatedAt: number;
-  interviewDate?: string;
-  interviewTime?: string;
-  meetUri?: string;
-  meetCode?: string;
 }
 
 export interface User {
@@ -70,8 +66,6 @@ export interface ProfessionalEvent {
   type: 'Webinar' | 'Meetup' | 'Workshop';
   attendees: string[]; // emails
   image?: string;
-  meetUri?: string;
-  meetCode?: string;
 }
 
 export interface PortfolioItem {
@@ -167,6 +161,4 @@ export interface Appointment {
   notes?: string;
   status: 'Scheduled' | 'Completed' | 'Cancelled';
   createdAt: number;
-  meetUri?: string;
-  meetCode?: string;
 }

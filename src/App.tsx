@@ -55,17 +55,11 @@ import {
   BarChart2,
   FileText,
   XCircle,
-  Filter,
-  Cloud,
-  Database,
-  Video
+  Filter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppStorage } from './useAppStorage';
-import { User, Job, Announcement, Notification, UserRole, PortfolioItem, CommunityPost, ProfessionalEvent, Appointment, JobApplication } from './types';
-import { GoogleMeetHubModal } from './components/GoogleMeetHubModal';
-import { ScheduleInterviewModal } from './components/ScheduleInterviewModal';
-import { createGoogleMeetSpace } from './googleMeet';
+import { User, Job, Announcement, Notification, UserRole, PortfolioItem, CommunityPost, ProfessionalEvent, Appointment } from './types';
 
 // --- Sub-components (Simplified for now, can be extracted later) ---
 
@@ -92,22 +86,17 @@ export default function App() {
     events,
     applications,
     isLoading,
-    isFirebaseConnected,
     login,
-    loginWithGoogle,
     logout,
     updateCurrentUser,
     addNotificationTo,
     setAnnouncements,
     setJobs,
-    addJob,
-    addAnnouncement,
     addCommunityPost,
     likePost,
     addEvent,
     joinEvent,
     createJobApplication,
-    updateApplication,
     updateApplicationStatus,
     appointments,
     bookAppointment,
@@ -150,7 +139,6 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [authError, setAuthError] = useState('');
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [roleSelection, setRoleSelection] = useState<UserRole | null>(null);
   
@@ -161,17 +149,7 @@ export default function App() {
   const [bookingTimeSlot, setBookingTimeSlot] = useState('10:00 AM - 10:30 AM');
   const [bookingNotes, setBookingNotes] = useState('');
   const [bookingSuccess, setBookingSuccess] = useState<Appointment | null>(null);
-  const [bookingIncludeMeet, setBookingIncludeMeet] = useState(true);
-  const [isBookingLoading, setIsBookingLoading] = useState(false);
   const [showMyBookingsModal, setShowMyBookingsModal] = useState(false);
-  
-  // Google Meet Hub & Scheduling State
-  const [showMeetHubModal, setShowMeetHubModal] = useState(false);
-  const [schedulingInterviewForApp, setSchedulingInterviewForApp] = useState<JobApplication | null>(null);
-  const [chatMeetConfirmModal, setChatMeetConfirmModal] = useState<{ targetEmail: string; targetName: string } | null>(null);
-  const [isCreatingChatMeet, setIsCreatingChatMeet] = useState(false);
-  const [eventIncludeMeet, setEventIncludeMeet] = useState(true);
-  const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   
   // Profile Editing State
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -783,48 +761,6 @@ export default function App() {
                 <span>{authMode === 'login' ? 'Sign In' : 'Continue to Role Selection'}</span>
               </button>
 
-              <div className="relative flex items-center justify-center my-3">
-                <div className="border-t border-oc-gold/15 w-full"></div>
-                <span className="bg-white dark:bg-oc-navy px-3 text-[11px] uppercase tracking-wider text-gray-400 font-semibold shrink-0">
-                  Or continue with
-                </span>
-                <div className="border-t border-oc-gold/15 w-full"></div>
-              </div>
-
-              <button
-                type="button"
-                disabled={isGoogleLoading}
-                onClick={async () => {
-                  setIsGoogleLoading(true);
-                  setAuthError('');
-                  try {
-                    const res = await loginWithGoogle();
-                    if (res && res.success && res.user) {
-                      setActivePage('home');
-                    } else if (res && !res.success && res.error) {
-                      setAuthError(res.error);
-                    }
-                  } catch (err: any) {
-                    setAuthError(err?.message || 'Failed to sign in with Google');
-                  } finally {
-                    setIsGoogleLoading(false);
-                  }
-                }}
-                className="w-full bg-oc-cream/80 dark:bg-white/5 hover:bg-oc-gold/10 border border-oc-gold/20 text-oc-navy dark:text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-3 text-xs shadow-sm hover:border-oc-gold disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isGoogleLoading ? (
-                  <div className="w-4 h-4 border-2 border-oc-gold border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                    <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z" />
-                    <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.6h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.9z" />
-                    <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.8s.1-2.1.4-2.8L1.9 6.3C.7 8.7 0 10.3 0 12s.7 3.3 1.9 5.7l3.7-2.9z" />
-                    <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.4-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z" />
-                  </svg>
-                )}
-                <span>{isGoogleLoading ? 'Connecting to Google...' : 'Continue with Google'}</span>
-              </button>
-
               {authMode === 'login' && (
                 <div className="pt-2 text-center">
                   <button
@@ -840,14 +776,6 @@ export default function App() {
                   </button>
                 </div>
               )}
-
-              {/* Cloud Sync Status */}
-              <div className="pt-2 flex items-center justify-center gap-1.5 text-[10px] text-gray-400">
-                <Cloud size={12} className={isFirebaseConnected ? "text-green-500" : "text-amber-500"} />
-                <span>
-                  {isFirebaseConnected ? "Connected to Cloud Firestore" : "Local Sync Mode Active"}
-                </span>
-              </div>
             </form>
           </motion.div>
         </div>
@@ -948,13 +876,9 @@ export default function App() {
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         flex flex-col border-r border-oc-gold/10
       `}>
-        <div className="p-6 border-b border-oc-gold/10">
+        <div className="p-8 border-b border-oc-gold/10">
           <div className="text-xl font-serif font-bold text-oc-gold-light tracking-tight">Online Corporate</div>
           <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 mt-1">Professional Network</div>
-          <div className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-oc-gold/10 border border-oc-gold/20 text-[9px] font-semibold text-oc-gold">
-            <span className={`w-1.5 h-1.5 rounded-full ${isFirebaseConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-            <span>{isFirebaseConnected ? 'Cloud Sync Online' : 'Local Cache Active'}</span>
-          </div>
         </div>
         
         <nav className="flex-1 overflow-y-auto pt-6 px-4 space-y-1">
@@ -989,20 +913,6 @@ export default function App() {
               )}
             </button>
           ))}
-
-          <button
-            type="button"
-            onClick={() => { setShowMeetHubModal(true); setIsSidebarOpen(false); }}
-            className="w-full mt-2 flex items-center gap-3 px-4 py-3 rounded-2xl bg-gradient-to-r from-blue-600/20 to-emerald-600/20 hover:from-blue-600/30 hover:to-emerald-600/30 border border-emerald-500/30 text-emerald-400 font-bold text-xs transition-all shadow-sm group"
-          >
-            <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-blue-600 to-emerald-500 flex items-center justify-center text-white shrink-0 shadow-md">
-              <Video size={14} />
-            </div>
-            <div className="text-left min-w-0">
-              <div className="text-white text-xs font-bold truncate">Google Meet</div>
-              <div className="text-[9px] text-emerald-400/80 font-normal">Video &amp; Conferences</div>
-            </div>
-          </button>
         </nav>
 
         <div className="p-4 border-t border-oc-gold/10 space-y-1">
@@ -1073,15 +983,6 @@ export default function App() {
                     )}
                   </button>
                 )}
-
-                <button 
-                  onClick={() => setShowMeetHubModal(true)}
-                  className="relative px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600/10 to-emerald-600/10 hover:from-blue-600/20 hover:to-emerald-600/20 text-blue-600 dark:text-emerald-400 transition-all flex items-center gap-1.5 font-bold text-xs border border-emerald-500/30 shadow-sm"
-                  title="Google Meet Hub & Video Calls"
-                >
-                  <Video size={15} className="text-emerald-500" />
-                  <span className="hidden sm:inline">Google Meet</span>
-                </button>
 
                 <button 
                   onClick={() => setShowMyBookingsModal(true)}
@@ -1787,88 +1688,36 @@ export default function App() {
                     {activeConversation ? (
                       <>
                         {/* Chat Header */}
-                        <div className="p-4 bg-white dark:bg-oc-navy border-b border-oc-gold/5 flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <button 
-                              className="sm:hidden p-2 -ml-2 text-gray-500" 
-                              onClick={() => setActiveConversation(null)}
-                            >
-                              <X size={20} />
-                            </button>
-                            <img 
-                              src={users[activeConversation]?.photo || users[activeConversation]?.logo || 'https://via.placeholder.com/32'} 
-                              className="w-8 h-8 rounded-full object-cover" 
-                              alt="" 
-                            />
-                            <div className="min-w-0">
-                              <div className="font-bold text-sm truncate">{users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}</div>
-                              <div className="text-[10px] text-green-500 font-medium">Online</div>
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            disabled={isCreatingChatMeet}
-                            onClick={() => setChatMeetConfirmModal({
-                              targetEmail: activeConversation,
-                              targetName: users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation
-                            })}
-                            className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white rounded-xl text-xs font-bold shadow-md hover:scale-105 transition-all flex items-center gap-1.5 shrink-0"
-                            title="Start Google Meet Video Call"
+                        <div className="p-4 bg-white dark:bg-oc-navy border-b border-oc-gold/5 flex items-center gap-3">
+                          <button 
+                            className="sm:hidden p-2 -ml-2 text-gray-500" 
+                            onClick={() => setActiveConversation(null)}
                           >
-                            <Video size={14} />
-                            <span className="hidden sm:inline">Start Meet Call</span>
+                            <X size={20} />
                           </button>
+                          <img 
+                            src={users[activeConversation]?.photo || users[activeConversation]?.logo || 'https://via.placeholder.com/32'} 
+                            className="w-8 h-8 rounded-full object-cover" 
+                            alt="" 
+                          />
+                          <div className="flex-1">
+                            <div className="font-bold text-sm">{users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}</div>
+                            <div className="text-[10px] text-green-500 font-medium">Online</div>
+                          </div>
                         </div>
 
                         {/* Chat Body */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
                           {messages[[currentUser?.email, activeConversation].sort().join('::')]?.map((m: any, idx: number) => {
                             const isMine = m.from === currentUser?.email;
-                            const isMeetMessage = typeof m.text === 'string' && (m.text.includes('meet.google.com') || m.text.includes('Google Meet'));
-                            const meetUrlMatch = typeof m.text === 'string' ? m.text.match(/https:\/\/meet\.google\.com\/[a-z0-9-]+/i) : null;
-                            const meetUrl = meetUrlMatch ? meetUrlMatch[0] : null;
-
                             return (
                               <div key={idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[85%] sm:max-w-[75%] p-3.5 rounded-2xl text-sm ${
+                                <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${
                                   isMine 
                                     ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy rounded-tr-none shadow-sm' 
                                     : 'bg-white dark:bg-oc-navy border border-oc-gold/5 rounded-tl-none shadow-sm'
                                 }`}>
-                                  {isMeetMessage && meetUrl ? (
-                                    <div className="space-y-3">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-7 h-7 rounded-lg bg-emerald-500 text-white flex items-center justify-center shadow">
-                                          <Video size={14} />
-                                        </div>
-                                        <span className="text-xs font-bold uppercase tracking-wider">
-                                          Google Meet Video Room
-                                        </span>
-                                      </div>
-                                      <div className="text-xs opacity-90 whitespace-pre-wrap">
-                                        {m.text}
-                                      </div>
-                                      <div className="pt-1">
-                                        <a
-                                          href={meetUrl}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black shadow transition-all ${
-                                            isMine 
-                                              ? 'bg-oc-gold text-oc-navy dark:bg-oc-navy dark:text-oc-gold hover:scale-105' 
-                                              : 'bg-gradient-to-r from-blue-600 to-emerald-600 text-white hover:scale-105'
-                                          }`}
-                                        >
-                                          <Video size={13} />
-                                          <span>Join Video Call</span>
-                                          <ExternalLink size={12} />
-                                        </a>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div>{m.text}</div>
-                                  )}
+                                  {m.text}
                                   <div className={`text-[9px] mt-1 text-right opacity-60`}>
                                     {new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                   </div>
@@ -2077,19 +1926,6 @@ export default function App() {
                           <h3 className="font-bold text-lg mb-2">{event.title}</h3>
                           <p className="text-xs text-gray-500 line-clamp-2 mb-4">{event.description}</p>
                           
-                          {event.meetUri && (event.attendees.includes(currentUser?.email || '') || event.hostEmail === currentUser?.email) && (
-                            <a
-                              href={event.meetUri}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="w-full mb-4 py-2.5 px-3 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 shadow-md transition-all hover:scale-[1.02]"
-                            >
-                              <Video size={14} />
-                              <span>Join Google Meet Video</span>
-                              <ExternalLink size={13} />
-                            </a>
-                          )}
-
                           <div className="flex items-center justify-between pt-4 border-t border-oc-gold/5">
                             <div className="flex -space-x-2">
                               {event.attendees.slice(0, 3).map(a => (
@@ -2189,27 +2025,6 @@ export default function App() {
                               <div className="text-[10px] text-gray-400 mt-1 uppercase font-bold tracking-tighter">
                                 Applied: {new Date(app.appliedAt).toLocaleDateString()}
                               </div>
-
-                              {app.status === 'Interviewing' && app.interviewDate && (
-                                <div className="mt-3 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/50 text-xs space-y-2">
-                                  <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 font-bold">
-                                    <Video size={15} className="text-emerald-500 shrink-0" />
-                                    <span>Interview: {app.interviewDate} ({app.interviewTime})</span>
-                                  </div>
-                                  {app.meetUri && (
-                                    <a
-                                      href={app.meetUri}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white rounded-lg font-bold text-xs shadow transition-all hover:scale-105"
-                                    >
-                                      <Video size={13} />
-                                      <span>Join Google Meet</span>
-                                      <ExternalLink size={12} />
-                                    </a>
-                                  )}
-                                </div>
-                              )}
                             </div>
                           </div>
 
@@ -2228,26 +2043,16 @@ export default function App() {
                             </div>
                             
                             {(currentUser?.role === 'Employer' || currentUser?.role === 'BusinessOwner') && app.employerEmail === currentUser.email && (
-                              <div className="space-y-2 mt-2">
-                                <div className="flex flex-wrap gap-1">
-                                  {(['Applied', 'Under Review', 'Interviewing', 'Offered', 'Rejected'] as any[]).map(s => (
-                                    <button
-                                      key={s}
-                                      onClick={() => updateApplicationStatus(app.id, s)}
-                                      className={`px-2 py-1 rounded-md text-[8px] font-black uppercase transition-all ${app.status === s ? 'bg-oc-navy text-oc-gold' : 'bg-gray-100 dark:bg-white/5 text-gray-400 hover:text-oc-navy'}`}
-                                    >
-                                      {s}
-                                    </button>
-                                  ))}
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => setSchedulingInterviewForApp(app)}
-                                  className="w-full py-1.5 px-2.5 bg-gradient-to-r from-blue-600/10 to-emerald-600/10 hover:from-blue-600/20 hover:to-emerald-600/20 text-blue-600 dark:text-emerald-400 border border-emerald-500/30 rounded-lg text-[10px] font-extrabold flex items-center justify-center gap-1.5 transition-all"
-                                >
-                                  <Video size={12} className="text-emerald-500" />
-                                  <span>Schedule Google Meet Interview</span>
-                                </button>
+                              <div className="flex flex-wrap gap-1 mt-2">
+                                {(['Applied', 'Under Review', 'Interviewing', 'Offered', 'Rejected'] as any[]).map(s => (
+                                  <button
+                                    key={s}
+                                    onClick={() => updateApplicationStatus(app.id, s)}
+                                    className={`px-2 py-1 rounded-md text-[8px] font-black uppercase transition-all ${app.status === s ? 'bg-oc-navy text-oc-gold' : 'bg-gray-100 dark:bg-white/5 text-gray-400 hover:text-oc-navy'}`}
+                                  >
+                                    {s}
+                                  </button>
+                                ))}
                               </div>
                             )}
                           </div>
@@ -3766,7 +3571,8 @@ export default function App() {
                    posterRole: currentUser!.role!,
                    time: new Date().toLocaleDateString()
                  };
-                 addJob(job);
+                 setJobs([job, ...jobs]);
+                 localStorage.setItem('oc_jobs', JSON.stringify([job, ...jobs]));
                  setShowJobModal(false);
                }} className="space-y-4">
                  <input required name="title" placeholder="Job Title" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
@@ -3799,32 +3605,16 @@ export default function App() {
               className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10"
             >
               <h2 className="text-2xl font-serif font-bold mb-6">Host Professional Event</h2>
-              <form onSubmit={async (e) => {
+              <form onSubmit={(e) => {
                 e.preventDefault();
-                setIsCreatingEvent(true);
                 const fd = new FormData(e.currentTarget);
-                let meetUri: string | undefined;
-                let meetCode: string | undefined;
-                if (eventIncludeMeet) {
-                  try {
-                    const space = await createGoogleMeetSpace();
-                    meetUri = space.meetingUri;
-                    meetCode = space.meetingCode;
-                  } catch (err) {
-                    console.warn('Could not generate Meet space for event:', err);
-                  }
-                }
-                const customLocation = fd.get('location') as string;
                 addEvent({
                   title: fd.get('title') as string,
                   type: fd.get('type') as any,
                   date: fd.get('date') as string,
-                  location: customLocation || (meetUri ? 'Google Meet Video' : 'Online'),
+                  location: fd.get('location') as string,
                   description: fd.get('description') as string,
-                  meetUri,
-                  meetCode
                 });
-                setIsCreatingEvent(false);
                 setShowAddEventModal(false);
               }} className="space-y-4">
                 <input required name="title" placeholder="Event Title (e.g. UX Design Workshop)" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
@@ -3834,41 +3624,11 @@ export default function App() {
                     <option value="Meetup">Meetup</option>
                     <option value="Workshop">Workshop</option>
                   </select>
-                  <input required name="date" placeholder="Date & Time (e.g. Oct 24, 4:00 PM)" className="bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
+                  <input required name="date" placeholder="Date & Time" className="bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
                 </div>
-                <input name="location" placeholder="Location / Venue (leave empty to use Google Meet)" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
-                <textarea required name="description" placeholder="What is this event about?" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none h-28" />
-                
-                <label className="flex items-center gap-3 p-3.5 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/50 dark:border-blue-800/30 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={eventIncludeMeet}
-                    onChange={(e) => setEventIncludeMeet(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 rounded"
-                  />
-                  <div className="text-xs">
-                    <div className="font-bold text-oc-navy dark:text-white flex items-center gap-1.5">
-                      <Video size={13} className="text-emerald-500" />
-                      <span>Generate Google Meet Video Room</span>
-                    </div>
-                    <div className="text-gray-500 text-[10px]">Creates an instant Google Meet link accessible to all attendees</div>
-                  </div>
-                </label>
-
-                <button 
-                  type="submit" 
-                  disabled={isCreatingEvent}
-                  className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2"
-                >
-                  {isCreatingEvent ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                      <span>Creating Event & Meet Room...</span>
-                    </>
-                  ) : (
-                    <span>Schedule Event</span>
-                  )}
-                </button>
+                <input required name="location" placeholder="Location (e.g. Zoom, Sheraton Hotel)" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
+                <textarea required name="description" placeholder="What is this event about?" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none h-32" />
+                <button className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-4 rounded-xl shadow-lg">Schedule Event</button>
               </form>
             </motion.div>
           </div>
@@ -4225,31 +3985,16 @@ export default function App() {
                   </div>
 
                   <form 
-                    onSubmit={async (e) => {
+                    onSubmit={(e) => {
                       e.preventDefault();
-                      setIsBookingLoading(true);
-                      let meetUri: string | undefined;
-                      let meetCode: string | undefined;
-                      if (bookingIncludeMeet) {
-                        try {
-                          const space = await createGoogleMeetSpace();
-                          meetUri = space.meetingUri;
-                          meetCode = space.meetingCode;
-                        } catch (err) {
-                          console.warn('Could not generate Google Meet space:', err);
-                        }
-                      }
                       const appt = bookAppointment({
                         hostEmail: bookingTarget.email,
                         hostName: bookingTarget.bizName || bookingTarget.name || bookingTarget.email,
                         topic: bookingTopic,
                         date: bookingDate || new Date(Date.now() + 86400000).toISOString().split('T')[0],
                         timeSlot: bookingTimeSlot,
-                        notes: bookingNotes,
-                        meetUri,
-                        meetCode
+                        notes: bookingNotes
                       });
-                      setIsBookingLoading(false);
                       setBookingSuccess(appt);
                     }} 
                     className="space-y-5"
@@ -4289,7 +4034,7 @@ export default function App() {
                       </label>
                       <div className="space-y-2">
                         <input 
-                          type="date" 
+                          type="date"
                           required
                           min={new Date().toISOString().split('T')[0]}
                           value={bookingDate}
@@ -4368,23 +4113,6 @@ export default function App() {
                       />
                     </div>
 
-                    {/* Google Meet Toggle */}
-                    <label className="flex items-center gap-3 p-3.5 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/50 dark:border-blue-800/30 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={bookingIncludeMeet}
-                        onChange={(e) => setBookingIncludeMeet(e.target.checked)}
-                        className="w-4 h-4 text-blue-600 rounded"
-                      />
-                      <div className="text-xs">
-                        <div className="font-bold text-oc-navy dark:text-white flex items-center gap-1.5">
-                          <Video size={13} className="text-emerald-500" />
-                          <span>Attach Google Meet Conference Space</span>
-                        </div>
-                        <div className="text-gray-500 text-[10px]">Automatically creates a secure video room for this call</div>
-                      </div>
-                    </label>
-
                     <div className="pt-2 flex gap-3">
                       <button
                         type="button"
@@ -4395,20 +4123,10 @@ export default function App() {
                       </button>
                       <button
                         type="submit"
-                        disabled={isBookingLoading}
                         className="flex-[2] bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-black py-3.5 rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all text-xs flex items-center justify-center gap-2"
                       >
-                        {isBookingLoading ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                            <span>Booking & Generating Meet...</span>
-                          </>
-                        ) : (
-                          <>
-                            <CalendarDays size={16} />
-                            <span>Confirm & Book Call</span>
-                          </>
-                        )}
+                        <CalendarDays size={16} />
+                        Confirm & Book Call
                       </button>
                     </div>
                   </form>
@@ -4444,22 +4162,7 @@ export default function App() {
                       <span className="text-gray-400 uppercase font-bold">Time Slot:</span>
                       <span className="font-bold">{bookingSuccess.timeSlot}</span>
                     </div>
-                    {bookingSuccess.meetUri && (
-                      <div className="pt-2 border-t border-oc-gold/10">
-                        <div className="text-[10px] text-gray-400 uppercase font-bold mb-1">Google Meet Video:</div>
-                        <a
-                          href={bookingSuccess.meetUri}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white font-bold rounded-lg text-xs shadow"
-                        >
-                          <Video size={13} />
-                          <span>Join Google Meet Video</span>
-                          <ExternalLink size={12} />
-                        </a>
-                      </div>
-                    )}
-                    <div className="flex justify-between pt-1">
+                    <div className="flex justify-between">
                       <span className="text-gray-400 uppercase font-bold">Status:</span>
                       <Badge className="bg-green-100 text-green-700">Scheduled</Badge>
                     </div>
@@ -4569,19 +4272,7 @@ export default function App() {
                             )}
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
-                            {appt.meetUri && appt.status === 'Scheduled' && (
-                              <a
-                                href={appt.meetUri}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white rounded-xl text-xs font-black hover:scale-105 transition-all flex items-center gap-1.5 shadow-md"
-                              >
-                                <Video size={14} />
-                                <span>Join Meet</span>
-                                <ExternalLink size={12} />
-                              </a>
-                            )}
+                          <div className="flex items-center gap-2 shrink-0">
                             <button
                               onClick={() => {
                                 setShowMyBookingsModal(false);
@@ -4764,136 +4455,6 @@ export default function App() {
                   className="flex-1 bg-red-600 text-white font-bold py-2.5 rounded-xl text-xs shadow hover:bg-red-700 transition-all"
                 >
                   Decline Request
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Google Meet Hub Modal */}
-      {currentUser && (
-        <GoogleMeetHubModal
-          isOpen={showMeetHubModal}
-          onClose={() => setShowMeetHubModal(false)}
-          currentUser={currentUser}
-          users={users}
-          appointments={appointments}
-          applications={applications}
-          events={events}
-          onSendMessage={(toEmail, text) => {
-            sendMessage(toEmail, text);
-          }}
-          onOpenChat={(toEmail) => {
-            setActivePage('messages');
-            setActiveConversation(toEmail);
-          }}
-        />
-      )}
-
-      {/* Schedule Interview Modal with Google Meet */}
-      {currentUser && (
-        <ScheduleInterviewModal
-          application={schedulingInterviewForApp}
-          onClose={() => setSchedulingInterviewForApp(null)}
-          currentUser={currentUser}
-          onScheduleComplete={(appId, interviewDate, interviewTime, meetUri, meetCode) => {
-            updateApplication(appId, {
-              status: 'Interview Scheduled',
-              interviewDate,
-              interviewTime,
-              meetUri,
-              meetCode
-            });
-            if (schedulingInterviewForApp) {
-              const msg = `📅 Interview Invitation: You have been scheduled for an interview for "${schedulingInterviewForApp.jobTitle}" on ${interviewDate} at ${interviewTime}.${meetUri ? ` Join Google Meet Video: ${meetUri}` : ''}`;
-              sendMessage(schedulingInterviewForApp.applicantEmail, msg);
-            }
-            setSchedulingInterviewForApp(null);
-          }}
-        />
-      )}
-
-      {/* Chat Start Meet Confirmation Modal (Explicit confirmation dialog before generating meeting space) */}
-      <AnimatePresence>
-        {chatMeetConfirmModal && (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }} 
-              exit={{ opacity: 0 }} 
-              className="absolute inset-0 bg-black/70 backdrop-blur-md" 
-              onClick={() => !isCreatingChatMeet && setChatMeetConfirmModal(null)} 
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 0 }}
-              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/20 z-10 space-y-5"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-blue-600 dark:text-blue-400">
-                  <Video size={24} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-serif font-bold text-oc-navy dark:text-oc-gold-light">
-                    Start Google Meet Video Call?
-                  </h3>
-                  <p className="text-xs text-gray-500">
-                    With {chatMeetConfirmModal.targetName}
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-4 bg-blue-50/50 dark:bg-blue-950/20 rounded-2xl border border-blue-200/50 dark:border-blue-800/30 text-xs text-gray-600 dark:text-gray-300 space-y-2">
-                <p>
-                  This will generate a Google Meet video conference link using Google Workspace Meet REST API and post the invite directly into your chat conversation.
-                </p>
-                <div className="text-[11px] text-gray-400 flex items-center gap-1.5">
-                  <Video size={12} className="text-emerald-500" />
-                  <span>Both participants can join instantly with one click.</span>
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  disabled={isCreatingChatMeet}
-                  onClick={() => setChatMeetConfirmModal(null)}
-                  className="flex-1 py-3 text-xs font-bold text-gray-500 hover:text-oc-navy dark:hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={isCreatingChatMeet}
-                  onClick={async () => {
-                    if (!chatMeetConfirmModal) return;
-                    setIsCreatingChatMeet(true);
-                    try {
-                      const space = await createGoogleMeetSpace();
-                      const message = `📹 I've started a Google Meet video conference. Join here: ${space.meetingUri}`;
-                      sendMessage(chatMeetConfirmModal.targetEmail, message);
-                      setChatMeetConfirmModal(null);
-                    } catch (err: any) {
-                      console.error('Failed to create chat Meet room:', err);
-                    } finally {
-                      setIsCreatingChatMeet(false);
-                    }
-                  }}
-                  className="flex-[2] bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white font-bold py-3.5 rounded-2xl text-xs shadow-lg flex items-center justify-center gap-2"
-                >
-                  {isCreatingChatMeet ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                      <span>Creating Space...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Video size={15} />
-                      <span>Create & Send Call Link</span>
-                    </>
-                  )}
                 </button>
               </div>
             </motion.div>

@@ -55,15 +55,11 @@ import {
   BarChart2,
   FileText,
   XCircle,
-  Filter,
-  Cloud
+  Filter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppStorage } from './useAppStorage';
-import { syncFirebase } from './firebaseSync';
-import { User, Job, Announcement, Notification, UserRole, PortfolioItem, CommunityPost, ProfessionalEvent, Appointment, UserAd } from './types';
-import { UserAdsSection } from './components/UserAdsSection';
-import { AdCreationModal } from './components/AdCreationModal';
+import { User, Job, Announcement, Notification, UserRole, PortfolioItem, CommunityPost, ProfessionalEvent, Appointment } from './types';
 
 // --- Sub-components (Simplified for now, can be extracted later) ---
 
@@ -90,15 +86,12 @@ export default function App() {
     events,
     applications,
     isLoading,
-    isFirebaseConnected,
     login,
     logout,
     updateCurrentUser,
     addNotificationTo,
     setAnnouncements,
     setJobs,
-    syncJob,
-    syncAnnouncement,
     addCommunityPost,
     likePost,
     addEvent,
@@ -108,11 +101,6 @@ export default function App() {
     appointments,
     bookAppointment,
     cancelAppointment,
-    addUserAd,
-    updateUserAd,
-    deleteUserAd,
-    toggleFeatureUserAd,
-    updateUserVideoPitch,
     sendMessage,
     markThreadAsRead,
     markNotifsRead,
@@ -135,10 +123,6 @@ export default function App() {
   const [messageInput, setMessageInput] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('oc_dark') === 'true');
-
-  // Ad & Video Showcase State
-  const [showAdModal, setShowAdModal] = useState(false);
-  const [editingAd, setEditingAd] = useState<UserAd | null>(null);
 
   // Admin Controls State
   const [adminTab, setAdminTab] = useState<'verifications' | 'users' | 'jobs' | 'community' | 'broadcast'>('verifications');
@@ -230,39 +214,6 @@ export default function App() {
   // Rating State
   const [submittingRating, setSubmittingRating] = useState(false);
 
-  // Ad Actions Handlers
-  const handleInquireInChat = (targetUser: User, ad: UserAd) => {
-    if (!currentUser) return;
-    const inquiryText = `👋 Hello ${targetUser.bizName || targetUser.name || 'there'}! I am interested in your advertised item: "${ad.title}"${ad.price ? ` (Price: ${ad.price})` : ''}. Is this still available / Can I place an order?`;
-    sendMessage(targetUser.email, inquiryText);
-    setActivePage('messages');
-    setActiveConversation(targetUser.email);
-    markThreadAsRead(targetUser.email);
-    setViewingProfile(null);
-  };
-
-  const handleBookCallForAd = (targetUser: User, ad: UserAd) => {
-    if (!currentUser) return;
-    setViewingProfile(null);
-    setBookingTarget(targetUser);
-    setBookingTopic(`Discussion: ${ad.title}`);
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    setBookingDate(tomorrow.toISOString().split('T')[0]);
-    setBookingTimeSlot('10:00 AM - 10:30 AM');
-    setBookingNotes(`Inquiring about ${ad.category}: ${ad.title}${ad.price ? ` (${ad.price})` : ''}`);
-  };
-
-  const handleSaveAd = (adData: Omit<UserAd, 'id' | 'createdAt' | 'userEmail'>) => {
-    if (editingAd) {
-      updateUserAd(editingAd.id, adData);
-      setEditingAd(null);
-    } else {
-      addUserAd(adData);
-    }
-    setShowAdModal(false);
-  };
-
   // Handle initial route and new user onboarding
   React.useEffect(() => {
     const path = window.location.pathname;
@@ -351,33 +302,6 @@ export default function App() {
       localStorage.setItem('oc_temp_email', cleanEmail);
       setAuthError('');
       setShowRoleModal(true);
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    try {
-      setAuthError('');
-      const gUser = await syncFirebase.signInWithGoogle();
-      if (gUser && gUser.email) {
-        const cleanEmail = gUser.email.trim().toLowerCase();
-        let existing = users[cleanEmail];
-        if (!existing) {
-          const newUser: User = {
-            email: cleanEmail,
-            name: gUser.displayName || cleanEmail.split('@')[0],
-            photo: gUser.photoURL || undefined,
-            isVerified: true,
-            role: 'Employee'
-          };
-          saveUser(newUser);
-          existing = newUser;
-        }
-        login(cleanEmail, existing);
-        setActivePage('home');
-      }
-    } catch (error: any) {
-      console.error('Google Sign In Error:', error);
-      setAuthError(error.message || 'Google Sign-in failed');
     }
   };
 
@@ -837,25 +761,6 @@ export default function App() {
                 <span>{authMode === 'login' ? 'Sign In' : 'Continue to Role Selection'}</span>
               </button>
 
-              <div className="relative my-4 flex items-center justify-center">
-                <div className="border-t border-oc-gold/15 w-full"></div>
-                <span className="bg-white dark:bg-oc-navy px-3 text-[10px] uppercase font-bold text-gray-400">or</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleGoogleSignIn}
-                className="w-full bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/15 text-gray-700 dark:text-gray-200 font-bold py-3 rounded-xl transition-all border border-oc-gold/20 flex items-center justify-center gap-2 text-xs shadow-sm"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-                </svg>
-                <span>Continue with Google</span>
-              </button>
-
               {authMode === 'login' && (
                 <div className="pt-2 text-center">
                   <button
@@ -1093,16 +998,6 @@ export default function App() {
                   )}
                 </button>
               </>
-            )}
-            {currentUser && (
-              <div 
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border border-oc-gold/20 bg-oc-gold/5 text-oc-navy dark:text-oc-gold select-none"
-                title={isFirebaseConnected ? "Firebase Firestore: Live & Synchronized" : "Local Storage Mode"}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${isFirebaseConnected ? 'bg-green-500 animate-pulse' : 'bg-amber-400'}`} />
-                <Cloud size={12} className="text-oc-gold" />
-                <span className="hidden md:inline">{isFirebaseConnected ? 'Cloud Synced' : 'Offline'}</span>
-              </div>
             )}
             <button 
               onClick={toggleDarkMode}
@@ -1532,13 +1427,6 @@ export default function App() {
                               {calcRating(u.ratings)}
                             </div>
                           </div>
-                          {((u.ads && u.ads.length > 0) || u.videoPitch?.videoUrl) && (
-                            <div className="mt-2 flex items-center gap-1">
-                              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-oc-gold text-oc-navy">
-                                {u.ads && u.ads.length > 0 ? `🛍️ ${u.ads.length} Goods/Ads` : '🎬 Video Pitch'}
-                              </span>
-                            </div>
-                          )}
                         </motion.div>
                       ))}
                     </div>
@@ -1572,20 +1460,6 @@ export default function App() {
                             <div className="text-[9px] text-green-600 font-bold uppercase mt-1 flex items-center gap-1">
                               <div className="w-1 h-1 rounded-full bg-green-500" />
                               Open to Work
-                            </div>
-                          )}
-                          {((u.ads && u.ads.length > 0) || u.videoPitch?.videoUrl) && (
-                            <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-                              {u.videoPitch?.videoUrl && (
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-oc-gold/15 text-oc-gold flex items-center gap-1">
-                                  🎬 Video Reel
-                                </span>
-                              )}
-                              {u.ads && u.ads.length > 0 && (
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center gap-1">
-                                  🛍️ {u.ads.length} {u.ads.length === 1 ? 'Ad' : 'Ads'}
-                                </span>
-                              )}
                             </div>
                           )}
                           <div className="mt-2.5 pt-2 border-t border-oc-gold/10 flex items-center justify-between">
@@ -3301,27 +3175,6 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Video Showcase & Advertisements for Owner */}
-                        <div className="pt-8 border-t border-oc-gold/10">
-                          <UserAdsSection
-                            user={currentUser}
-                            currentUser={currentUser}
-                            isOwner={true}
-                            onInquireInChat={handleInquireInChat}
-                            onBookCallForAd={handleBookCallForAd}
-                            onOpenCreateAdModal={() => {
-                              setEditingAd(null);
-                              setShowAdModal(true);
-                            }}
-                            onEditAd={(ad) => {
-                              setEditingAd(ad);
-                              setShowAdModal(true);
-                            }}
-                            onDeleteAd={deleteUserAd}
-                            onToggleFeatureAd={toggleFeatureUserAd}
-                          />
-                        </div>
-
                         {currentUser.role === 'BusinessOwner' && (
                           <div className="pt-6 border-t border-oc-gold/5">
                             <div className="flex items-center justify-between mb-4">
@@ -3463,11 +3316,11 @@ export default function App() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setViewingProfile(null)} />
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-white dark:bg-oc-navy rounded-3xl shadow-2xl border border-oc-gold/10"
+              className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl overflow-hidden shadow-2xl border border-oc-gold/10"
             >
               <div className="h-32 bg-oc-navy-mid" />
-              <div className="px-6 sm:px-8 pb-8 relative">
-                <div className="absolute -top-12 left-6 sm:left-8 p-1 bg-white dark:bg-oc-navy rounded-2xl">
+              <div className="px-8 pb-8 relative">
+                <div className="absolute -top-12 left-8 p-1 bg-white dark:bg-oc-navy rounded-2xl">
                   <img src={viewingProfile.photo || viewingProfile.logo || 'https://via.placeholder.com/100'} className="w-24 h-24 rounded-xl object-cover shadow-lg" alt="" />
                 </div>
                 <div className="pt-16">
@@ -3556,39 +3409,6 @@ export default function App() {
                       <MessageSquare size={18} />
                       Send Message
                     </button>
-                  </div>
-
-                  {/* Video Pitch & Advertised Goods Section */}
-                  <div className="mt-8 pt-8 border-t border-oc-gold/15">
-                    <UserAdsSection
-                      user={viewingProfile}
-                      currentUser={currentUser}
-                      isOwner={currentUser?.email === viewingProfile.email}
-                      onInquireInChat={handleInquireInChat}
-                      onBookCallForAd={handleBookCallForAd}
-                      onOpenCreateAdModal={() => {
-                        setEditingAd(null);
-                        setShowAdModal(true);
-                      }}
-                      onEditAd={(ad) => {
-                        setEditingAd(ad);
-                        setShowAdModal(true);
-                      }}
-                      onDeleteAd={(adId) => {
-                        deleteUserAd(adId);
-                        setViewingProfile(prev => prev ? {
-                          ...prev,
-                          ads: (prev.ads || []).filter(a => a.id !== adId)
-                        } : null);
-                      }}
-                      onToggleFeatureAd={(adId) => {
-                        toggleFeatureUserAd(adId);
-                        setViewingProfile(prev => prev ? {
-                          ...prev,
-                          ads: (prev.ads || []).map(a => a.id === adId ? { ...a, featured: !a.featured } : a)
-                        } : null);
-                      }}
-                    />
                   </div>
 
                   {/* Skills & Endorsements */}
@@ -3753,7 +3573,6 @@ export default function App() {
                  };
                  setJobs([job, ...jobs]);
                  localStorage.setItem('oc_jobs', JSON.stringify([job, ...jobs]));
-                 syncJob(job);
                  setShowJobModal(false);
                }} className="space-y-4">
                  <input required name="title" placeholder="Job Title" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
@@ -4642,18 +4461,6 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
-
-      {/* Ad & Video Pitch Creation / Edit Modal */}
-      <AdCreationModal
-        isOpen={showAdModal}
-        onClose={() => {
-          setShowAdModal(false);
-          setEditingAd(null);
-        }}
-        onSave={handleSaveAd}
-        initialAd={editingAd}
-        userEmail={currentUser?.email || ''}
-      />
     </div>
   );
 }

@@ -15,30 +15,6 @@ export interface JobApplication {
   updatedAt: number;
 }
 
-export type AdCategory = 'Self Promotion' | 'Goods & Products' | 'Professional Service' | 'Special Offer' | 'Portfolio Video';
-
-export interface UserAd {
-  id: string;
-  userEmail: string;
-  title: string;
-  category: AdCategory;
-  description: string;
-  type: 'video' | 'goods' | 'service';
-  videoUrl?: string;
-  videoThumbnail?: string;
-  images?: string[];
-  price?: string;
-  originalPrice?: string;
-  discountTag?: string;
-  tags?: string[];
-  ctaType?: 'chat' | 'link' | 'call';
-  ctaLink?: string;
-  ctaText?: string;
-  views?: number;
-  featured?: boolean;
-  createdAt: number;
-}
-
 export interface User {
   email: string;
   password?: string;
@@ -71,13 +47,6 @@ export interface User {
   ratings?: number[];
   ratingVoters?: Record<string, number>;
   portfolio?: PortfolioItem[];
-  ads?: UserAd[];
-  videoPitch?: {
-    title?: string;
-    videoUrl?: string;
-    description?: string;
-    thumbnail?: string;
-  };
   skillEndorsements?: Record<string, string[]>; // skillName -> list of emails who endorsed
   isAdmin?: boolean;
   verificationPending?: boolean;

@@ -55,7 +55,10 @@ import {
   BarChart2,
   FileText,
   XCircle,
-  Filter
+  Filter,
+  CreditCard,
+  Database,
+  Receipt
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppStorage } from './useAppStorage';
@@ -2854,30 +2857,32 @@ export default function App() {
                 <div className="max-w-2xl mx-auto space-y-6">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-xl font-serif font-bold text-oc-navy dark:text-oc-gold-light italic">Identity Card</h2>
-                    {!isEditingProfile ? (
-                      <button 
-                        onClick={startEditing}
-                        className="flex items-center gap-2 px-4 py-2 bg-oc-gold/10 text-oc-gold rounded-xl text-xs font-bold hover:bg-oc-gold/20 transition-all border border-oc-gold/20"
-                      >
-                        <Settings size={14} />
-                        Edit Profile
-                      </button>
-                    ) : (
-                      <div className="flex gap-2">
+                    <div className="flex items-center gap-2">
+                      {!isEditingProfile ? (
                         <button 
-                          onClick={() => setIsEditingProfile(false)}
-                          className="px-4 py-2 text-gray-500 text-xs font-bold hover:text-oc-navy transition-all"
+                          onClick={startEditing}
+                          className="flex items-center gap-2 px-4 py-2 bg-oc-gold/10 text-oc-gold rounded-xl text-xs font-bold hover:bg-oc-gold/20 transition-all border border-oc-gold/20"
                         >
-                          Cancel
+                          <Settings size={14} />
+                          Edit Profile
                         </button>
-                        <button 
-                          onClick={handleSaveProfile}
-                          className="px-6 py-2 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy rounded-xl text-xs font-bold shadow-lg hover:scale-105 active:scale-95 transition-all"
-                        >
-                          Save Changes
-                        </button>
-                      </div>
-                    )}
+                      ) : (
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => setIsEditingProfile(false)}
+                            className="px-4 py-2 text-gray-500 text-xs font-bold hover:text-oc-navy transition-all"
+                          >
+                            Cancel
+                          </button>
+                          <button 
+                            onClick={handleSaveProfile}
+                            className="px-6 py-2 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy rounded-xl text-xs font-bold shadow-lg hover:scale-105 active:scale-95 transition-all"
+                          >
+                            Save Changes
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="bg-white dark:bg-oc-navy border border-oc-gold/5 rounded-2xl overflow-hidden shadow-xl">

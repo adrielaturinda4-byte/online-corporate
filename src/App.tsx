@@ -872,22 +872,6 @@ export default function App() {
                   <span>{authMode === 'login' ? 'Sign In' : 'Continue to Role Selection'}</span>
                 )}
               </button>
-
-              {authMode === 'login' && (
-                <div className="pt-2 text-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmail('adrielaturinda4@gmail.com');
-                      setPassword('adrielissocool1');
-                      setAuthError('');
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-oc-gold/10 hover:bg-oc-gold/20 text-oc-gold font-bold text-[11px] border border-oc-gold/20 transition-all"
-                  >
-                    <Shield size={12} /> Fill Admin Credentials (adrielaturinda4@gmail.com)
-                  </button>
-                </div>
-              )}
             </form>
           </motion.div>
         </div>

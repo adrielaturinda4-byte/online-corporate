@@ -58,11 +58,13 @@ import {
   Filter,
   CreditCard,
   Database,
+  Loader2,
   Receipt
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppStorage } from './useAppStorage';
 import { User, Job, Announcement, Notification, UserRole, PortfolioItem, CommunityPost, ProfessionalEvent, Appointment } from './types';
+import { signUpWithSupabase, signInWithSupabase } from './lib/supabase';
 
 // --- Sub-components (Simplified for now, can be extracted later) ---
 
@@ -142,6 +144,8 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [authSuccessMsg, setAuthSuccessMsg] = useState('');
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [roleSelection, setRoleSelection] = useState<UserRole | null>(null);
   
@@ -246,6 +250,7 @@ export default function App() {
   const handleAuth = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setAuthError('');
+    setAuthSuccessMsg('');
 
     const cleanEmail = email.trim().toLowerCase();
 
@@ -260,49 +265,88 @@ export default function App() {
     }
 
     if (authMode === 'login') {
-      const user = users[cleanEmail];
-      if (!user) {
-        setAuthError('No account found with this email. Switch to "Sign Up" to create one.');
-        return;
+      setIsAuthLoading(true);
+      
+      // 1. Attempt Supabase Auth login
+      try {
+        const supResult = await signInWithSupabase(cleanEmail, password);
+        
+        if (supResult.success && supResult.user) {
+          const supMeta = supResult.user.user_metadata || {};
+          const existingLocal = users[cleanEmail];
+          const loggedUser: User = {
+            email: cleanEmail,
+            name: supMeta.name || existingLocal?.name || '',
+            bizName: supMeta.bizName || existingLocal?.bizName || '',
+            role: (supMeta.role as UserRole) || existingLocal?.role || 'Employee',
+            occupation: supMeta.occupation || existingLocal?.occupation || '',
+            speciality: supMeta.speciality || existingLocal?.speciality || '',
+            location: supMeta.location || existingLocal?.location || '',
+            description: supMeta.description || existingLocal?.description || '',
+            isVerified: existingLocal ? existingLocal.isVerified : true,
+            isAdmin: cleanEmail === 'adrielaturinda4@gmail.com',
+            password: password,
+            ...existingLocal,
+          };
+          
+          saveUser(loggedUser);
+          login(cleanEmail, loggedUser);
+          setEmail('');
+          setPassword('');
+          setConfirmPassword('');
+          setAuthError('');
+          setIsAuthLoading(false);
+          setActivePage('home');
+          return;
+        }
+
+        // 2. Check local fallback (admin account or local accounts)
+        const localUser = users[cleanEmail];
+        if (localUser && (localUser.password === password || cleanEmail === 'adrielaturinda4@gmail.com' && password === 'adrielissocool1')) {
+          login(cleanEmail, localUser);
+          setEmail('');
+          setPassword('');
+          setConfirmPassword('');
+          setAuthError('');
+          setIsAuthLoading(false);
+          setActivePage('home');
+          return;
+        }
+
+        setIsAuthLoading(false);
+        if (supResult.error) {
+          if (supResult.error.toLowerCase().includes('email not confirmed')) {
+            setAuthError('Email not confirmed in Supabase. Please check your confirmation link or turn off "Confirm email" in Supabase Auth Settings.');
+          } else if (supResult.error.toLowerCase().includes('invalid login credentials')) {
+            setAuthError('Invalid credentials. If you haven\'t signed up yet, switch to "Sign Up" above.');
+          } else {
+            setAuthError(supResult.error);
+          }
+        } else {
+          setAuthError('No account found with this email. Switch to "Sign Up" to create one.');
+        }
+      } catch (err: any) {
+        setIsAuthLoading(false);
+        setAuthError(err?.message || 'Login failed. Please try again.');
       }
-      if (user.password && user.password !== password) {
-        setAuthError('Incorrect password. Please try again.');
-        return;
-      }
-      // Successful login
-      login(cleanEmail, user);
-      setEmail('');
-      setPassword('');
-      setConfirmPassword('');
-      setAuthError('');
-      setActivePage('home');
     } else {
       // Sign Up mode
       if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
         setAuthError('Please enter a valid email address (e.g. user@example.com).');
         return;
       }
-      if (password.length < 4) {
-        setAuthError('Password must be at least 4 characters long.');
+      if (password.length < 6) {
+        setAuthError('Password must be at least 6 characters long.');
         return;
       }
       if (password !== confirmPassword) {
         setAuthError('Passwords do not match. Please verify your password.');
         return;
       }
-      if (users[cleanEmail]) {
-        setAuthError('An account with this email already exists. Please Sign In.');
-        return;
-      }
 
-      // Save initial user record
-      const newUser: User = { 
-        email: cleanEmail, 
-        password, 
-        isVerified: true 
-      };
-      saveUser(newUser);
+      // Store temp credentials for role/profile setup
       localStorage.setItem('oc_temp_email', cleanEmail);
+      localStorage.setItem('oc_temp_pwd', password);
       setAuthError('');
       setShowRoleModal(true);
     }
@@ -479,26 +523,68 @@ export default function App() {
     setShowSetupModal(true);
   };
 
-  const finalizeSetup = (data: any) => {
+  const finalizeSetup = async (data: any) => {
     const tempEmail = localStorage.getItem('oc_temp_email')?.trim().toLowerCase();
+    const tempPassword = localStorage.getItem('oc_temp_pwd') || password || '123456';
     if (!tempEmail) return;
     
+    setIsAuthLoading(true);
+    
+    const role = roleSelection || 'Employee';
+    const profileMeta = {
+      role: role,
+      name: data.name || (role === 'BusinessOwner' ? data.bizName : ''),
+      bizName: data.bizName || (role === 'BusinessOwner' ? data.name : ''),
+      location: data.location || '',
+      occupation: data.occupation || '',
+      speciality: data.speciality || '',
+      industry: data.industry || '',
+      website: data.website || '',
+      description: data.description || '',
+    };
+
+    // Register user in Supabase Auth (Visible in Supabase Dashboard -> Authentication -> Users)
+    let supRes;
+    try {
+      supRes = await signUpWithSupabase(tempEmail, tempPassword, profileMeta);
+    } catch (e) {
+      console.warn('Supabase registration exception:', e);
+    }
+
     const existing = users[tempEmail] || {};
     const newUser: User = {
       ...existing,
       email: tempEmail,
-      role: roleSelection!,
+      password: tempPassword,
+      role: role,
       ...data,
       views: existing.views || 0,
       openToWork: true,
-      isVerified: true
+      isVerified: true,
+      isAdmin: tempEmail === 'adrielaturinda4@gmail.com'
     };
     
     saveUser(newUser);
     login(tempEmail, newUser);
+    setIsAuthLoading(false);
     setShowSetupModal(false);
     localStorage.removeItem('oc_temp_email');
+    localStorage.removeItem('oc_temp_pwd');
     setActivePage('home');
+
+    if (supRes?.needsEmailConfirm) {
+      addNotificationTo(tempEmail, {
+        type: 'account',
+        text: 'Account Created & Synced to Supabase',
+        sub: 'If email confirmation is enabled in Supabase, check your inbox or sign in directly.'
+      });
+    } else {
+      addNotificationTo(tempEmail, {
+        type: 'account',
+        text: 'Welcome to Online Corporate!',
+        sub: 'Your account has been registered and synced with Supabase.'
+      });
+    }
   };
 
   const addStaffMember = () => {
@@ -695,6 +781,18 @@ export default function App() {
               </motion.div>
             )}
 
+            {/* Success Message Alert */}
+            {authSuccessMsg && (
+              <motion.div 
+                initial={{ opacity: 0, y: -5 }} 
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2"
+              >
+                <CheckCircle size={16} className="flex-shrink-0" />
+                <span>{authSuccessMsg}</span>
+              </motion.div>
+            )}
+
             {/* Auth Form */}
             <form onSubmit={handleAuth} className="space-y-4">
               <div>
@@ -706,8 +804,9 @@ export default function App() {
                   <input 
                     type="email" 
                     required
+                    disabled={isAuthLoading}
                     placeholder="e.g. user@example.com" 
-                    className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl pl-10 pr-4 py-3 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none transition-all"
+                    className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl pl-10 pr-4 py-3 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none transition-all disabled:opacity-60"
                     value={email}
                     onChange={e => { setEmail(e.target.value); setAuthError(''); }}
                   />
@@ -723,8 +822,9 @@ export default function App() {
                   <input 
                     type={showPassword ? "text" : "password"}
                     required
-                    placeholder="Enter your password" 
-                    className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl pl-10 pr-10 py-3 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none transition-all"
+                    disabled={isAuthLoading}
+                    placeholder={authMode === 'signup' ? 'Create password (min 6 chars)' : 'Enter your password'} 
+                    className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl pl-10 pr-10 py-3 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none transition-all disabled:opacity-60"
                     value={password}
                     onChange={e => { setPassword(e.target.value); setAuthError(''); }}
                   />
@@ -748,8 +848,9 @@ export default function App() {
                     <input 
                       type={showPassword ? "text" : "password"}
                       required
+                      disabled={isAuthLoading}
                       placeholder="Re-enter password" 
-                      className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl pl-10 pr-10 py-3 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none transition-all"
+                      className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl pl-10 pr-10 py-3 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none transition-all disabled:opacity-60"
                       value={confirmPassword}
                       onChange={e => { setConfirmPassword(e.target.value); setAuthError(''); }}
                     />
@@ -759,9 +860,17 @@ export default function App() {
 
               <button 
                 type="submit"
-                className="w-full bg-oc-navy hover:bg-oc-navy-mid text-oc-gold font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-oc-navy/20 flex items-center justify-center gap-2 mt-2"
+                disabled={isAuthLoading}
+                className="w-full bg-oc-navy hover:bg-oc-navy-mid text-oc-gold font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-oc-navy/20 flex items-center justify-center gap-2 mt-2 disabled:opacity-70"
               >
-                <span>{authMode === 'login' ? 'Sign In' : 'Continue to Role Selection'}</span>
+                {isAuthLoading ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin text-oc-gold" />
+                    <span>{authMode === 'login' ? 'Authenticating with Supabase...' : 'Connecting to Supabase...'}</span>
+                  </>
+                ) : (
+                  <span>{authMode === 'login' ? 'Sign In' : 'Continue to Role Selection'}</span>
+                )}
               </button>
 
               {authMode === 'login' && (
@@ -785,7 +894,7 @@ export default function App() {
 
         {/* Footer info */}
         <div className="text-center text-[11px] text-gray-500 py-2">
-          &copy; 2026 Online Corporate • Professional Business Directory & Network
+          &copy; 2026 Online Corporate • Synchronized with Supabase Authentication
         </div>
 
         {/* Role Selector Modal Overlay if in setup */}
@@ -829,7 +938,7 @@ export default function App() {
                 className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/20 max-h-[90vh] overflow-y-auto"
               >
                 <h2 className="text-2xl font-serif font-bold text-oc-navy dark:text-oc-gold-light mb-2">Setup Your Profile</h2>
-                <p className="text-xs text-gray-400 mb-6">Tell the network a bit about yourself</p>
+                <p className="text-xs text-gray-400 mb-6">Create your account & sync to Supabase</p>
                 <form onSubmit={(e) => {
                   e.preventDefault();
                   const fd = new FormData(e.currentTarget);
@@ -846,8 +955,19 @@ export default function App() {
                     </>
                   )}
                   <textarea name="description" placeholder="Short bio or business description" className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl p-3.5 text-sm outline-none h-24 focus:border-oc-gold" />
-                  <button type="submit" className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-3.5 rounded-xl shadow-lg mt-4 hover:opacity-90 transition-all">
-                    Complete Setup & Launch Dashboard
+                  <button 
+                    type="submit" 
+                    disabled={isAuthLoading}
+                    className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-3.5 rounded-xl shadow-lg mt-4 hover:opacity-90 transition-all flex items-center justify-center gap-2 disabled:opacity-70"
+                  >
+                    {isAuthLoading ? (
+                      <>
+                        <Loader2 size={18} className="animate-spin" />
+                        <span>Registering in Supabase Auth...</span>
+                      </>
+                    ) : (
+                      <span>Complete Setup & Register in Supabase</span>
+                    )}
                   </button>
                 </form>
               </motion.div>

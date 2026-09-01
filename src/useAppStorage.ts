@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { User, Announcement, Job, Notification, Message, JobSearchHistory, CommunityPost, PortfolioItem, ProfessionalEvent, JobApplication, ApplicationStatus, Appointment } from './types';
+import { supabase, signOutFromSupabase, updateUserMetadataInSupabase } from './lib/supabase';
 
 export function useAppStorage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -66,6 +67,35 @@ export function useAppStorage() {
       setCurrentUser(loadedUsers[loggedEmail]);
     }
 
+    // Check active Supabase session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.email) {
+        const supEmail = session.user.email.trim().toLowerCase();
+        if (loadedUsers[supEmail]) {
+          setCurrentUser(loadedUsers[supEmail]);
+          localStorage.setItem('oc_logged', supEmail);
+        } else {
+          // Construct user from Supabase user_metadata if not in localStorage yet
+          const meta = session.user.user_metadata || {};
+          const syncedUser: User = {
+            email: supEmail,
+            name: meta.name || '',
+            bizName: meta.bizName || '',
+            role: meta.role || 'Employee',
+            occupation: meta.occupation || '',
+            location: meta.location || '',
+            description: meta.description || '',
+            isVerified: true,
+          };
+          loadedUsers[supEmail] = syncedUser;
+          setUsers({ ...loadedUsers });
+          localStorage.setItem(`oc_u_${supEmail}`, JSON.stringify(syncedUser));
+          setCurrentUser(syncedUser);
+          localStorage.setItem('oc_logged', supEmail);
+        }
+      }
+    }).catch(() => {});
+
     // Load other data
     try {
       setAnnouncements(JSON.parse(localStorage.getItem('oc_ann') || '[]'));
@@ -109,6 +139,7 @@ export function useAppStorage() {
   const logout = () => {
     localStorage.removeItem('oc_logged');
     setCurrentUser(null);
+    signOutFromSupabase().catch(() => {});
   };
 
   const updateCurrentUser = (updates: Partial<User>) => {
@@ -116,6 +147,7 @@ export function useAppStorage() {
     const updated = { ...currentUser, ...updates };
     setCurrentUser(updated);
     saveUser(updated);
+    updateUserMetadataInSupabase(updated).catch(() => {});
   };
 
   const createJobApplication = (job: Job) => {

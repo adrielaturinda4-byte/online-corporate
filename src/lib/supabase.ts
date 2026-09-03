@@ -86,7 +86,14 @@ export async function signUpWithSupabase(
         await supabase.from('profiles').upsert({
           id: data.user.id,
           email: cleanEmail,
-          ...metadata,
+          name: metadata?.name || '',
+          biz_name: metadata?.bizName || '',
+          role: metadata?.role || 'Employee',
+          occupation: metadata?.occupation || '',
+          speciality: metadata?.speciality || '',
+          location: metadata?.location || '',
+          description: metadata?.description || '',
+          is_verified: true,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'email' });
       } catch (profileErr) {
@@ -143,6 +150,69 @@ export async function signOutFromSupabase(): Promise<{ success: boolean; error?:
 }
 
 /**
+ * Fetch all registered user profiles from the Supabase public.profiles table
+ */
+export async function fetchProfilesFromSupabase(): Promise<User[]> {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*');
+
+    if (error || !data) {
+      return [];
+    }
+
+    return data.map((row: any) => ({
+      email: (row.email || '').trim().toLowerCase(),
+      name: row.name || '',
+      bizName: row.biz_name || row.bizName || '',
+      role: row.role || 'Employee',
+      occupation: row.occupation || '',
+      speciality: row.speciality || '',
+      location: row.location || '',
+      description: row.description || '',
+      photo: row.photo || '',
+      logo: row.logo || '',
+      isVerified: row.is_verified ?? row.isVerified ?? false,
+      isAdmin: (row.email || '').trim().toLowerCase() === 'adrielaturinda4@gmail.com',
+    }));
+  } catch (err) {
+    return [];
+  }
+}
+
+/**
+ * Save / Upsert a user profile into the Supabase public.profiles table
+ */
+export async function upsertProfileToSupabase(user: User): Promise<{ success: boolean; error?: string }> {
+  try {
+    const cleanEmail = user.email.trim().toLowerCase();
+    const { error } = await supabase.from('profiles').upsert({
+      email: cleanEmail,
+      name: user.name || '',
+      biz_name: user.bizName || '',
+      role: user.role || 'Employee',
+      occupation: user.occupation || '',
+      speciality: user.speciality || '',
+      location: user.location || '',
+      description: user.description || '',
+      photo: user.photo || '',
+      logo: user.logo || '',
+      is_verified: user.isVerified || false,
+      is_admin: cleanEmail === 'adrielaturinda4@gmail.com',
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'email' });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
+/**
  * Update user metadata in Supabase
  */
 export async function updateUserMetadataInSupabase(user: User): Promise<{ success: boolean; error?: string }> {
@@ -164,20 +234,8 @@ export async function updateUserMetadataInSupabase(user: User): Promise<{ succes
       console.warn('Supabase metadata update note:', error.message);
     }
 
-    // Try upserting to public profiles table
-    try {
-      await supabase.from('profiles').upsert({
-        email: user.email.trim().toLowerCase(),
-        name: user.name,
-        biz_name: user.bizName,
-        role: user.role,
-        occupation: user.occupation,
-        location: user.location,
-        description: user.description,
-        is_verified: user.isVerified,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'email' });
-    } catch (_) {}
+    // Also upsert to public profiles table
+    await upsertProfileToSupabase(user);
 
     return { success: true };
   } catch (err: any) {

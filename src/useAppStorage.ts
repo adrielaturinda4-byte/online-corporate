@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { User, Announcement, Job, Notification, Message, JobSearchHistory, CommunityPost, PortfolioItem, ProfessionalEvent, JobApplication, ApplicationStatus, Appointment } from './types';
-import { supabase, signOutFromSupabase, updateUserMetadataInSupabase } from './lib/supabase';
+import { supabase, signOutFromSupabase, updateUserMetadataInSupabase, fetchProfilesFromSupabase, upsertProfileToSupabase } from './lib/supabase';
 
 export function useAppStorage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -96,6 +96,21 @@ export function useAppStorage() {
       }
     }).catch(() => {});
 
+    // Fetch all registered user profiles from Supabase database
+    fetchProfilesFromSupabase().then(remoteProfiles => {
+      if (remoteProfiles && remoteProfiles.length > 0) {
+        setUsers(prev => {
+          const merged = { ...prev };
+          remoteProfiles.forEach(p => {
+            const e = p.email.trim().toLowerCase();
+            merged[e] = { ...(merged[e] || {}), ...p };
+            localStorage.setItem(`oc_u_${e}`, JSON.stringify(merged[e]));
+          });
+          return merged;
+        });
+      }
+    }).catch(() => {});
+
     // Load other data
     try {
       setAnnouncements(JSON.parse(localStorage.getItem('oc_ann') || '[]'));
@@ -123,6 +138,8 @@ export function useAppStorage() {
     if (currentUser?.email.trim().toLowerCase() === cleanEmail) {
       setCurrentUser(updatedUser);
     }
+    // Sync profile across devices in Supabase public.profiles
+    upsertProfileToSupabase(updatedUser).catch(() => {});
   };
 
   const login = (email: string, user?: User) => {

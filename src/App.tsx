@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   Briefcase, 
   MessageSquare, 
@@ -126,6 +126,15 @@ export default function App() {
   const [activePage, setActivePage] = useState<'home' | 'jobs' | 'messages' | 'notifications' | 'card' | 'discover' | 'community' | 'events' | 'applications' | 'about' | 'admin'>('about');
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll chat to latest message
+  useEffect(() => {
+    if (activePage === 'messages' && activeConversation) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [activePage, activeConversation, messages]);
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('oc_dark') === 'true');
 
@@ -1815,23 +1824,43 @@ export default function App() {
 
                         {/* Chat Body */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
+                          {(!messages[[currentUser?.email, activeConversation].sort().join('::')] || messages[[currentUser?.email, activeConversation].sort().join('::')].length === 0) && (
+                            <div className="text-center py-12 text-gray-400 space-y-3">
+                              <div className="w-14 h-14 rounded-2xl bg-oc-gold/10 text-oc-gold flex items-center justify-center mx-auto">
+                                <MessageSquare size={24} />
+                              </div>
+                              <h4 className="font-bold text-sm text-oc-navy dark:text-oc-gold-light">
+                                Start chatting with {users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}
+                              </h4>
+                              <p className="text-xs text-gray-400 max-w-xs mx-auto">
+                                Messages sent here are synced in real-time across both of your accounts and devices.
+                              </p>
+                            </div>
+                          )}
+
                           {messages[[currentUser?.email, activeConversation].sort().join('::')]?.map((m: any, idx: number) => {
                             const isMine = m.from === currentUser?.email;
                             return (
                               <div key={idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${
+                                <div className={`max-w-[80%] p-3.5 rounded-2xl text-sm ${
                                   isMine 
                                     ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy rounded-tr-none shadow-sm' 
-                                    : 'bg-white dark:bg-oc-navy border border-oc-gold/5 rounded-tl-none shadow-sm'
+                                    : 'bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-tl-none shadow-sm text-oc-navy dark:text-white'
                                 }`}>
-                                  {m.text}
-                                  <div className={`text-[9px] mt-1 text-right opacity-60`}>
-                                    {new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  <div className="leading-relaxed break-words whitespace-pre-wrap">{m.text}</div>
+                                  <div className={`text-[9px] mt-1.5 flex items-center justify-end gap-1 opacity-70 ${isMine ? 'text-oc-gold dark:text-oc-navy' : 'text-gray-400'}`}>
+                                    <span>{new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    {isMine && (
+                                      <span title={m.read ? "Read" : "Delivered"}>
+                                        {m.read ? "✓✓" : "✓"}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>
                             );
                           })}
+                          <div ref={messagesEndRef} />
                         </div>
 
                         {/* Chat Footer */}
@@ -1840,7 +1869,7 @@ export default function App() {
                             onSubmit={(e) => {
                               e.preventDefault();
                               if (messageInput.trim()) {
-                                sendMessage(activeConversation, messageInput);
+                                sendMessage(activeConversation, messageInput.trim());
                                 setMessageInput('');
                               }
                             }}
@@ -1848,14 +1877,15 @@ export default function App() {
                           >
                             <input 
                               type="text" 
-                              placeholder="Type your message..." 
-                              className="flex-1 bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-oc-gold outline-none"
+                              placeholder="Type your message... (Enter to send)" 
+                              className="flex-1 bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-oc-gold outline-none text-oc-navy dark:text-white"
                               value={messageInput}
                               onChange={e => setMessageInput(e.target.value)}
                             />
                             <button 
                               type="submit"
-                              className="bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy p-3 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-md"
+                              disabled={!messageInput.trim()}
+                              className="bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy p-3 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-md disabled:opacity-40 disabled:hover:scale-100 cursor-pointer disabled:cursor-not-allowed"
                             >
                               <Send size={20} />
                             </button>

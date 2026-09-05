@@ -242,3 +242,141 @@ export async function updateUserMetadataInSupabase(user: User): Promise<{ succes
     return { success: false, error: err?.message };
   }
 }
+
+/**
+ * Fetch all messages for a given user from Supabase
+ */
+export async function fetchMessagesFromSupabase(userEmail: string): Promise<Record<string, Array<{ from: string; text: string; time: number; read: boolean }>>> {
+  try {
+    const cleanEmail = userEmail.trim().toLowerCase();
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .or(`sender_email.eq.${cleanEmail},receiver_email.eq.${cleanEmail}`)
+      .order('created_at', { ascending: true });
+
+    if (error || !data) {
+      return {};
+    }
+
+    const grouped: Record<string, Array<{ from: string; text: string; time: number; read: boolean }>> = {};
+    for (const row of data) {
+      const sender = (row.sender_email || '').trim().toLowerCase();
+      const receiver = (row.receiver_email || '').trim().toLowerCase();
+      const key = [sender, receiver].sort().join('::');
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push({
+        from: sender,
+        text: row.text || '',
+        time: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+        read: Boolean(row.read)
+      });
+    }
+
+    return grouped;
+  } catch (err) {
+    return {};
+  }
+}
+
+/**
+ * Send a message to Supabase
+ */
+export async function sendMessageToSupabase(fromEmail: string, toEmail: string, text: string): Promise<{ success: boolean; error?: string; data?: any }> {
+  try {
+    const cleanFrom = fromEmail.trim().toLowerCase();
+    const cleanTo = toEmail.trim().toLowerCase();
+    const key = [cleanFrom, cleanTo].sort().join('::');
+
+    const { data, error } = await supabase
+      .from('messages')
+      .insert([
+        {
+          conversation_key: key,
+          sender_email: cleanFrom,
+          receiver_email: cleanTo,
+          text,
+          read: false,
+          created_at: new Date().toISOString()
+        }
+      ])
+      .select();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true, data: data?.[0] };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
+/**
+ * Mark messages in a thread as read in Supabase
+ */
+export async function markMessagesAsReadInSupabase(myEmail: string, otherEmail: string): Promise<void> {
+  try {
+    const cleanMy = myEmail.trim().toLowerCase();
+    const cleanOther = otherEmail.trim().toLowerCase();
+    await supabase
+      .from('messages')
+      .update({ read: true })
+      .match({
+        receiver_email: cleanMy,
+        sender_email: cleanOther,
+        read: false
+      });
+  } catch (_) {}
+}
+
+/**
+ * Realtime subscription to new messages for a user
+ */
+export function subscribeToMessages(userEmail: string, onNewMessage: (msg: any) => void) {
+  const cleanEmail = userEmail.trim().toLowerCase();
+  const channelName = `user_chat_${cleanEmail}_${Date.now()}`;
+  
+  const channel = supabase
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages'
+      },
+      (payload) => {
+        const newRecord = payload.new;
+        if (newRecord) {
+          const sender = (newRecord.sender_email || '').trim().toLowerCase();
+          const receiver = (newRecord.receiver_email || '').trim().toLowerCase();
+          if (sender === cleanEmail || receiver === cleanEmail) {
+            onNewMessage(newRecord);
+          }
+        }
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages'
+      },
+      (payload) => {
+        const updatedRecord = payload.new;
+        if (updatedRecord) {
+          const sender = (updatedRecord.sender_email || '').trim().toLowerCase();
+          const receiver = (updatedRecord.receiver_email || '').trim().toLowerCase();
+          if (sender === cleanEmail || receiver === cleanEmail) {
+            onNewMessage(updatedRecord);
+          }
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}

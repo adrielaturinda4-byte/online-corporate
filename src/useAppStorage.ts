@@ -1,6 +1,16 @@
 import { useState, useEffect } from 'react';
 import { User, Announcement, Job, Notification, Message, JobSearchHistory, CommunityPost, PortfolioItem, ProfessionalEvent, JobApplication, ApplicationStatus, Appointment } from './types';
-import { supabase, signOutFromSupabase, updateUserMetadataInSupabase, fetchProfilesFromSupabase, upsertProfileToSupabase } from './lib/supabase';
+import { 
+  supabase, 
+  signOutFromSupabase, 
+  updateUserMetadataInSupabase, 
+  fetchProfilesFromSupabase, 
+  upsertProfileToSupabase,
+  fetchMessagesFromSupabase,
+  sendMessageToSupabase,
+  markMessagesAsReadInSupabase,
+  subscribeToMessages
+} from './lib/supabase';
 
 export function useAppStorage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -129,6 +139,88 @@ export function useAppStorage() {
 
     setIsLoading(false);
   }, []);
+
+  // Synchronize and subscribe to messages in real-time via Supabase
+  useEffect(() => {
+    if (!currentUser?.email) return;
+    const myEmail = currentUser.email.trim().toLowerCase();
+
+    // Fetch existing messages from Supabase
+    const syncRemoteMessages = async () => {
+      try {
+        const remoteMsgs = await fetchMessagesFromSupabase(myEmail);
+        if (remoteMsgs && Object.keys(remoteMsgs).length > 0) {
+          setMessages(prev => {
+            const merged = { ...prev };
+            for (const [key, msgList] of Object.entries(remoteMsgs)) {
+              const existing = merged[key] || [];
+              const combined = [...existing];
+              for (const rm of msgList) {
+                const exists = combined.some(
+                  m => Math.abs(m.time - rm.time) < 2000 && m.text === rm.text && m.from === rm.from
+                );
+                if (!exists) {
+                  combined.push(rm);
+                }
+              }
+              combined.sort((a, b) => a.time - b.time);
+              merged[key] = combined;
+            }
+            localStorage.setItem('oc_msgs', JSON.stringify(merged));
+            return merged;
+          });
+        }
+      } catch (_) {}
+    };
+
+    syncRemoteMessages();
+
+    // Realtime channel for instant message receipt
+    const unsubscribe = subscribeToMessages(myEmail, (record) => {
+      const sender = (record.sender_email || '').trim().toLowerCase();
+      const receiver = (record.receiver_email || '').trim().toLowerCase();
+      const key = [sender, receiver].sort().join('::');
+      const newMsg: Message = {
+        from: sender,
+        text: record.text || '',
+        time: record.created_at ? new Date(record.created_at).getTime() : Date.now(),
+        read: Boolean(record.read)
+      };
+
+      setMessages(prev => {
+        const currentList = prev[key] || [];
+        const exists = currentList.some(
+          m => Math.abs(m.time - newMsg.time) < 2000 && m.text === newMsg.text && m.from === newMsg.from
+        );
+        if (exists) return prev;
+        const updated = {
+          ...prev,
+          [key]: [...currentList, newMsg]
+        };
+        localStorage.setItem('oc_msgs', JSON.stringify(updated));
+        return updated;
+      });
+
+      // Notification for incoming message
+      if (receiver === myEmail && sender !== myEmail) {
+        const senderUser = users[sender];
+        const senderName = senderUser?.bizName || senderUser?.name || sender;
+        addNotificationTo(myEmail, {
+          type: 'msg',
+          text: `New message from ${senderName}`,
+          sub: (record.text || '').slice(0, 50)
+        });
+      }
+    });
+
+    // Fallback sync every 6 seconds to ensure messages never lag
+    const intervalId = setInterval(syncRemoteMessages, 6000);
+
+    return () => {
+      unsubscribe();
+      clearInterval(intervalId);
+    };
+  }, [currentUser?.email]);
 
   const saveUser = (user: User) => {
     const cleanEmail = user.email.trim().toLowerCase();
@@ -293,11 +385,13 @@ export function useAppStorage() {
   };
 
   const sendMessage = (toEmail: string, text: string) => {
-    if (!currentUser) return;
-    const key = [currentUser.email, toEmail].sort().join('::');
+    if (!currentUser || !text.trim()) return;
+    const cleanFrom = currentUser.email.trim().toLowerCase();
+    const cleanTo = toEmail.trim().toLowerCase();
+    const key = [cleanFrom, cleanTo].sort().join('::');
     const newMsg: Message = {
-      from: currentUser.email,
-      text,
+      from: cleanFrom,
+      text: text.trim(),
       time: Date.now(),
       read: false
     };
@@ -307,26 +401,34 @@ export function useAppStorage() {
     setMessages(newMsgs);
     localStorage.setItem('oc_msgs', JSON.stringify(newMsgs));
 
+    // Persist to Supabase database
+    sendMessageToSupabase(cleanFrom, cleanTo, text.trim()).catch(() => {});
+
     const recipientName = currentUser.bizName || currentUser.name || currentUser.email;
-    addNotificationTo(toEmail, {
+    addNotificationTo(cleanTo, {
       type: 'msg',
       text: `New message from ${recipientName}`,
-      sub: text.slice(0, 50)
+      sub: text.trim().slice(0, 50)
     });
   };
 
   const markThreadAsRead = (otherEmail: string) => {
     if (!currentUser) return;
-    const key = [currentUser.email, otherEmail].sort().join('::');
+    const cleanMy = currentUser.email.trim().toLowerCase();
+    const cleanOther = otherEmail.trim().toLowerCase();
+    const key = [cleanMy, cleanOther].sort().join('::');
     if (!messages[key]) return;
     
     const updatedThread = messages[key].map(m => 
-      m.from !== currentUser.email ? { ...m, read: true } : m
+      m.from !== cleanMy ? { ...m, read: true } : m
     );
     
     const newMsgs = { ...messages, [key]: updatedThread };
     setMessages(newMsgs);
     localStorage.setItem('oc_msgs', JSON.stringify(newMsgs));
+
+    // Sync read state with Supabase
+    markMessagesAsReadInSupabase(cleanMy, cleanOther).catch(() => {});
   };
 
   const markNotifsRead = () => {

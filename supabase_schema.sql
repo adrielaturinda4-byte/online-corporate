@@ -115,3 +115,57 @@ SELECT
   (email = 'adrielaturinda4@gmail.com')
 FROM auth.users
 ON CONFLICT (email) DO NOTHING;
+
+-- ==============================================================================
+-- 7. REAL-TIME MESSAGING: Messages Table & Realtime Replication
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.messages (
+  id BIGSERIAL PRIMARY KEY,
+  conversation_key TEXT NOT NULL,
+  sender_email TEXT NOT NULL,
+  receiver_email TEXT NOT NULL,
+  text TEXT NOT NULL,
+  read BOOLEAN DEFAULT false,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- Index for speedy queries on user conversations
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_key ON public.messages (conversation_key);
+CREATE INDEX IF NOT EXISTS idx_messages_sender_email ON public.messages (sender_email);
+CREATE INDEX IF NOT EXISTS idx_messages_receiver_email ON public.messages (receiver_email);
+
+-- Enable Row Level Security (RLS)
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+
+-- Allow reading messages for conversation participants (or public access for directory messaging)
+DROP POLICY IF EXISTS "Allow read access to messages" ON public.messages;
+CREATE POLICY "Allow read access to messages"
+ON public.messages FOR SELECT
+USING (true);
+
+-- Allow inserting messages
+DROP POLICY IF EXISTS "Allow insert access to messages" ON public.messages;
+CREATE POLICY "Allow insert access to messages"
+ON public.messages FOR INSERT
+WITH CHECK (true);
+
+-- Allow updating messages (for marking as read)
+DROP POLICY IF EXISTS "Allow update access to messages" ON public.messages;
+CREATE POLICY "Allow update access to messages"
+ON public.messages FOR UPDATE
+USING (true);
+
+-- Enable Supabase Realtime broadcast on messages
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+    AND tablename = 'messages'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  NULL;
+END;
+$$;

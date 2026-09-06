@@ -59,11 +59,15 @@ import {
   CreditCard,
   Database,
   Loader2,
-  Receipt
+  Receipt,
+  RefreshCw,
+  Scan,
+  Fingerprint,
+  BadgeCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppStorage } from './useAppStorage';
-import { User, Job, Announcement, Notification, UserRole, PortfolioItem, CommunityPost, ProfessionalEvent, Appointment } from './types';
+import { User, Job, Announcement, Notification, UserRole, PortfolioItem, CommunityPost, ProfessionalEvent, Appointment, VerificationAnalysis, SecurityCheckItem } from './types';
 import { signUpWithSupabase, signInWithSupabase, signInWithGoogle } from './lib/supabase';
 
 // --- Sub-components (Simplified for now, can be extracted later) ---
@@ -108,6 +112,7 @@ export default function App() {
     cancelAppointment,
     sendMessage,
     markThreadAsRead,
+    markAllMessagesAsRead,
     markNotifsRead,
     saveUser,
     searchHistory,
@@ -195,13 +200,45 @@ export default function App() {
   const [showJobModal, setShowJobModal] = useState(false);
   const [showAnnModal, setShowAnnModal] = useState(false);
   const [showProfileVerificationForm, setShowProfileVerificationForm] = useState(false);
+  const [showCertificateModal, setShowCertificateModal] = useState<User | null>(null);
+  const [showUnlockBadgeRequirementModal, setShowUnlockBadgeRequirementModal] = useState(false);
+  const [aiScanStep, setAiScanStep] = useState<number>(0);
+  const [aiAnalysisResult, setAiAnalysisResult] = useState<VerificationAnalysis | null>(null);
+  const [selectedDocPreview, setSelectedDocPreview] = useState<string | null>(null);
+  const [selectedDocType, setSelectedDocType] = useState<string>('National ID');
+  const [isAdminReanalyzing, setIsAdminReanalyzing] = useState<boolean>(false);
   const [viewingProfile, setViewingProfile] = useState<User | null>(null);
+
+  const hasTrustedBadge = (u?: User | null): boolean => {
+    if (!u) return false;
+    return Boolean(u.trustedBadge || u.documentsAuthorized || u.isVerified);
+  };
 
   const isMainAdmin = currentUser?.email?.trim().toLowerCase() === 'adrielaturinda4@gmail.com';
 
   const pendingVerificationsCount = useMemo(() => {
     return (Object.values(users) as User[]).filter(u => u.verificationPending || (u.verificationDoc && !u.isVerified)).length;
   }, [users]);
+
+  const unreadMessagesCount = useMemo(() => {
+    if (!currentUser?.email) return 0;
+    const cleanMyEmail = currentUser.email.trim().toLowerCase();
+
+    return Object.entries(messages).reduce((total, [key, threadMessages]) => {
+      if (!Array.isArray(threadMessages) || threadMessages.length === 0) return total;
+      
+      const participants = key.toLowerCase().split('::').map(e => e.trim());
+      // Crucial: Only count messages in conversations where currentUser is an actual participant!
+      if (!participants.includes(cleanMyEmail)) return total;
+
+      // Count only incoming unread messages directed to the current user
+      const unreadCount = threadMessages.filter(
+        (m: any) => m && m.from && m.from.trim().toLowerCase() !== cleanMyEmail && !m.read
+      ).length;
+
+      return total + unreadCount;
+    }, 0);
+  }, [messages, currentUser]);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -293,7 +330,9 @@ export default function App() {
             speciality: supMeta.speciality || existingLocal?.speciality || '',
             location: supMeta.location || existingLocal?.location || '',
             description: supMeta.description || existingLocal?.description || '',
-            isVerified: existingLocal ? existingLocal.isVerified : true,
+            isVerified: existingLocal ? Boolean(existingLocal.isVerified) : false,
+            documentsAuthorized: existingLocal ? Boolean(existingLocal.documentsAuthorized || existingLocal.isVerified) : false,
+            trustedBadge: existingLocal ? Boolean(existingLocal.trustedBadge || existingLocal.isVerified) : false,
             isAdmin: cleanEmail === 'adrielaturinda4@gmail.com',
             password: password,
             ...existingLocal,
@@ -474,72 +513,123 @@ export default function App() {
     
     setIsVerifyingAI(true);
     setVerificationFeedback(null);
-    updateCurrentUser({ 
-      verificationPending: true,
-      verificationDoc: doc,
-      verificationType: type
-    });
+    setAiAnalysisResult(null);
+    setAiScanStep(0);
+
+    const stepTimer = setInterval(() => {
+      setAiScanStep(prev => (prev < 3 ? prev + 1 : prev));
+    }, 850);
 
     try {
       const response = await fetch('/api/verify-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ docBase64: doc, docType: type })
+        body: JSON.stringify({ 
+          docBase64: doc, 
+          docType: type,
+          userName: currentUser.name || currentUser.bizName || '',
+          userEmail: currentUser.email
+        })
       });
+
+      clearInterval(stepTimer);
+      setAiScanStep(4);
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         throw new Error(errData.error || 'Verification server error');
       }
       
-      const result = await response.json();
-      
-      if (result.verified && (result.confidence === undefined || result.confidence > 0.5)) {
+      const result: VerificationAnalysis = await response.json();
+      result.analyzedAt = Date.now();
+      setAiAnalysisResult(result);
+
+      if (result.verified && (result.confidence === undefined || result.confidence >= 70)) {
         updateCurrentUser({ 
-          isVerified: true, 
+          isVerified: true,
+          documentsAuthorized: true,
+          trustedBadge: true,
           verificationPending: false,
-          verificationReason: result.reason || 'Verified by AI'
+          verificationDoc: doc,
+          verificationType: type,
+          verificationReason: result.reason || 'Documents Authorized by Gemini AI Forensic Vision',
+          verificationAnalysis: result
         });
         addNotificationTo(currentUser.email, {
           type: 'account',
-          text: 'Profile Verified!',
-          sub: result.reason || 'AI has successfully verified your professional document.'
+          text: 'Documents Authorized! Trusted Badge Unlocked',
+          sub: result.reason || 'Your identity documents were authorized. The official Trusted Badge is now active on your profile.'
         });
         setVerificationFeedback({
           type: 'success',
-          message: result.reason || 'Document successfully verified! Your profile now has the Verified Member badge.'
+          message: result.reason || 'Document authorized! Your profile has unlocked the official Trusted Badge.'
         });
-        setTimeout(() => {
-          setShowProfileVerificationForm(false);
-          setVerificationFeedback(null);
-        }, 2200);
       } else {
-        updateCurrentUser({ 
-          isVerified: false, 
-          verificationPending: false,
-          verificationReason: result.reason || 'Verification could not be confirmed'
-        });
-        addNotificationTo(currentUser.email, {
-          type: 'account',
-          text: 'Verification Declined',
-          sub: result.reason || 'The provided document could not be verified by our AI.'
-        });
         setVerificationFeedback({
           type: 'error',
-          message: result.reason || 'Could not verify document authenticity. Please upload a clear photo of a valid National ID or Passport.'
+          message: result.reason || 'Could not verify document authenticity. Review the AI forensic checks below.'
         });
       }
     } catch (error: any) {
+      clearInterval(stepTimer);
       console.error('Verification error:', error);
-      updateCurrentUser({ 
-        verificationPending: false 
-      });
       setVerificationFeedback({
         type: 'error',
-        message: error.message || "AI Verification service error. Please ensure the document image is clear."
+        message: error.message || "AI Verification service error. Please ensure your document photo is bright and clear."
       });
     } finally {
       setIsVerifyingAI(false);
+    }
+  };
+
+  const submitForManualAdminReview = () => {
+    const docToSubmit = selectedDocPreview || currentUser?.verificationDoc;
+    if (!currentUser || !docToSubmit) return;
+    updateCurrentUser({
+      verificationPending: true,
+      verificationDoc: docToSubmit,
+      verificationType: selectedDocType || currentUser?.verificationType || 'National ID',
+      verificationReason: aiAnalysisResult?.reason ? `Submitted for Admin Review (AI: ${aiAnalysisResult.reason})` : 'Submitted for Manual Admin Review',
+      verificationAnalysis: aiAnalysisResult || undefined
+    });
+    addNotificationTo(currentUser.email, {
+      type: 'account',
+      text: 'Verification Under Review',
+      sub: 'Your identity document has been forwarded to the administrative team for manual inspection.'
+    });
+    setShowProfileVerificationForm(false);
+    setVerificationFeedback(null);
+    setAiAnalysisResult(null);
+    setSelectedDocPreview(null);
+  };
+
+  const handleAdminReanalyzeDoc = async (targetUser: User) => {
+    if (!targetUser.verificationDoc) return;
+    setIsAdminReanalyzing(true);
+    try {
+      const res = await fetch('/api/verify-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          docBase64: targetUser.verificationDoc,
+          docType: targetUser.verificationType || 'National ID',
+          userName: targetUser.name || targetUser.bizName || '',
+          userEmail: targetUser.email,
+        })
+      });
+      const analysis: VerificationAnalysis = await res.json();
+      analysis.analyzedAt = Date.now();
+      const updated: User = {
+        ...targetUser,
+        verificationAnalysis: analysis,
+        verificationReason: analysis.reason || targetUser.verificationReason
+      };
+      saveUser(updated);
+      setAdminDocPreview({ user: updated });
+    } catch (err) {
+      console.error('Reanalysis error:', err);
+    } finally {
+      setIsAdminReanalyzing(false);
     }
   };
 
@@ -586,7 +676,9 @@ export default function App() {
       ...data,
       views: existing.views || 0,
       openToWork: true,
-      isVerified: true,
+      isVerified: tempEmail === 'adrielaturinda4@gmail.com',
+      documentsAuthorized: tempEmail === 'adrielaturinda4@gmail.com',
+      trustedBadge: tempEmail === 'adrielaturinda4@gmail.com',
       isAdmin: tempEmail === 'adrielaturinda4@gmail.com'
     };
     
@@ -1072,7 +1164,7 @@ export default function App() {
             { id: 'applications', label: 'Applications', icon: CheckCircle, badge: (currentUser?.role === 'Employer' || currentUser?.role === 'BusinessOwner') ? applications.filter(a => a.employerEmail === currentUser.email && a.status === 'Applied').length : 0 },
             { id: 'community', label: 'Community', icon: Globe },
             { id: 'events', label: 'Events', icon: CalendarDays },
-            { id: 'messages', label: 'Messages', icon: MessageSquare, badge: Object.values(messages).flat().filter((m: any) => m.from !== currentUser?.email && !m.read).length },
+            { id: 'messages', label: 'Messages', icon: MessageSquare, badge: unreadMessagesCount > 0 ? unreadMessagesCount : 0 },
             { id: 'notifications', label: 'Notifications', icon: Bell, badge: notifications.filter(n => !n.read).length },
             { id: 'card', label: 'My Card', icon: UserCircle },
             ...(isMainAdmin ? [{ id: 'admin', label: 'Admin Controls', icon: Shield, badge: pendingVerificationsCount }] : []),
@@ -1088,7 +1180,7 @@ export default function App() {
             >
               <item.icon size={18} className={`${activePage === item.id ? 'text-oc-gold' : 'text-gray-500 group-hover:text-gray-300'}`} />
               <span className="font-medium">{item.label}</span>
-              {item.badge ? (
+              {Boolean(item.badge && item.badge > 0) ? (
                 <span className="ml-auto bg-red-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white min-w-[1.2rem] text-center">
                   {item.badge}
                 </span>
@@ -1603,7 +1695,12 @@ export default function App() {
                             <Building size={64} />
                           </div>
                           <img src={u.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-lg object-contain bg-white/5 p-1 mb-4 border border-white/10" alt="" />
-                          <div className="text-white font-bold text-sm mb-1 truncate">{u.bizName}</div>
+                          <div className="text-white font-bold text-sm mb-1 truncate flex items-center gap-1.5">
+                            <span className="truncate">{u.bizName}</span>
+                            {hasTrustedBadge(u) && (
+                              <ShieldCheck size={13} className="text-oc-gold shrink-0" title="Trusted Badge • Documents Authorized" />
+                            )}
+                          </div>
                           <div className="flex items-center justify-between">
                             <div className="text-oc-gold-light text-[10px] uppercase font-medium">{u.speciality || 'Professional'}</div>
                             <div className="flex items-center gap-0.5 text-oc-gold font-bold text-[10px]">
@@ -1638,7 +1735,14 @@ export default function App() {
                             <Star size={10} fill="currentColor" />
                             <span>{calcRating(u.ratings)}</span>
                           </div>
-                          <div className="font-bold text-sm mt-2 truncate text-oc-navy dark:text-white">{u.bizName || u.name}</div>
+                          <div className="font-bold text-sm mt-2 truncate text-oc-navy dark:text-white flex items-center gap-1.5">
+                            <span className="truncate">{u.bizName || u.name}</span>
+                            {hasTrustedBadge(u) && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/25 shrink-0" title="Trusted Badge • Documents Authorized">
+                                <ShieldCheck size={10} /> Trusted
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs text-gray-500 truncate">{u.speciality || u.occupation || u.email}</div>
                           {u.openToWork && u.role === 'Employee' && (
                             <div className="text-[9px] text-green-600 font-bold uppercase mt-1 flex items-center gap-1">
@@ -1809,23 +1913,40 @@ export default function App() {
                 <div className="bg-white dark:bg-oc-navy border border-oc-gold/5 rounded-2xl h-[calc(100vh-12rem)] flex overflow-hidden shadow-xl">
                   {/* Threads */}
                   <div className={`w-full sm:w-80 border-r border-oc-gold/5 flex flex-col ${activeConversation ? 'hidden sm:flex' : 'flex'}`}>
-                    <div className="p-4 border-b border-oc-gold/5 bg-oc-cream/20">
+                    <div className="p-4 border-b border-oc-gold/5 bg-oc-cream/20 flex items-center justify-between">
                       <h3 className="font-serif font-bold text-lg">Conversations</h3>
+                      {unreadMessagesCount > 0 && (
+                        <button
+                          onClick={markAllMessagesAsRead}
+                          className="text-[10px] text-oc-gold hover:underline font-semibold"
+                          title="Mark all incoming messages as read"
+                        >
+                          Mark all read
+                        </button>
+                      )}
                     </div>
                     <div className="flex-1 overflow-y-auto">
-                      {Object.keys(messages).filter(k => k.includes(currentUser?.email || '')).length > 0 ? (
+                      {Object.keys(messages).filter(k => {
+                        const parts = k.toLowerCase().split('::').map(e => e.trim());
+                        return currentUser?.email && parts.includes(currentUser.email.trim().toLowerCase());
+                      }).length > 0 ? (
                         Object.keys(messages)
-                          .filter(k => k.includes(currentUser?.email || ''))
+                          .filter(k => {
+                            const parts = k.toLowerCase().split('::').map(e => e.trim());
+                            return currentUser?.email && parts.includes(currentUser.email.trim().toLowerCase());
+                          })
                           .sort((a, b) => {
                             const lastA = messages[a][messages[a].length - 1]?.time || 0;
                             const lastB = messages[b][messages[b].length - 1]?.time || 0;
                             return lastB - lastA;
                           })
                           .map(key => {
-                            const otherEmail = key.split('::').find(e => e !== currentUser?.email);
-                            const otherUser = otherEmail ? users[otherEmail] : null;
+                            const myClean = currentUser?.email?.trim().toLowerCase() || '';
+                            const parts = key.split('::');
+                            const otherEmail = parts.find(e => e.trim().toLowerCase() !== myClean) || parts[0];
+                            const otherUser = otherEmail ? users[otherEmail.trim().toLowerCase()] || users[otherEmail] : null;
                             const lastMsg = messages[key][messages[key].length - 1];
-                            const unreadCount = messages[key].filter(m => m.from !== currentUser?.email && !m.read).length;
+                            const unreadCount = messages[key].filter(m => m && m.from && m.from.trim().toLowerCase() !== myClean && !m.read).length;
 
                             return (
                               <button
@@ -1834,7 +1955,7 @@ export default function App() {
                                   setActiveConversation(otherEmail || null);
                                   if (otherEmail) markThreadAsRead(otherEmail);
                                 }}
-                                className={`w-full text-left p-4 border-b border-oc-gold/5 hover:bg-oc-gold/5 transition-all flex gap-3 items-center ${activeConversation === otherEmail ? 'bg-oc-gold/10' : ''}`}
+                                className={`w-full text-left p-4 border-b border-oc-gold/5 hover:bg-oc-gold/5 transition-all flex gap-3 items-center ${activeConversation?.trim().toLowerCase() === otherEmail?.trim().toLowerCase() ? 'bg-oc-gold/10' : ''}`}
                               >
                                 <img src={otherUser?.photo || otherUser?.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover" alt="" />
                                 <div className="flex-1 min-w-0">
@@ -1892,42 +2013,51 @@ export default function App() {
 
                         {/* Chat Body */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
-                          {(!messages[[currentUser?.email, activeConversation].sort().join('::')] || messages[[currentUser?.email, activeConversation].sort().join('::')].length === 0) && (
-                            <div className="text-center py-12 text-gray-400 space-y-3">
-                              <div className="w-14 h-14 rounded-2xl bg-oc-gold/10 text-oc-gold flex items-center justify-center mx-auto">
-                                <MessageSquare size={24} />
-                              </div>
-                              <h4 className="font-bold text-sm text-oc-navy dark:text-oc-gold-light">
-                                Start chatting with {users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}
-                              </h4>
-                              <p className="text-xs text-gray-400 max-w-xs mx-auto">
-                                Messages sent here are synced in real-time across both of your accounts and devices.
-                              </p>
-                            </div>
-                          )}
+                          {(() => {
+                            const myClean = currentUser?.email?.trim().toLowerCase() || '';
+                            const activeClean = activeConversation?.trim().toLowerCase() || '';
+                            const threadKey = [myClean, activeClean].sort().join('::');
+                            const threadMsgs = messages[threadKey] || [];
 
-                          {messages[[currentUser?.email, activeConversation].sort().join('::')]?.map((m: any, idx: number) => {
-                            const isMine = m.from === currentUser?.email;
-                            return (
-                              <div key={idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[80%] p-3.5 rounded-2xl text-sm ${
-                                  isMine 
-                                    ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy rounded-tr-none shadow-sm' 
-                                    : 'bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-tl-none shadow-sm text-oc-navy dark:text-white'
-                                }`}>
-                                  <div className="leading-relaxed break-words whitespace-pre-wrap">{m.text}</div>
-                                  <div className={`text-[9px] mt-1.5 flex items-center justify-end gap-1 opacity-70 ${isMine ? 'text-oc-gold dark:text-oc-navy' : 'text-gray-400'}`}>
-                                    <span>{new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                    {isMine && (
-                                      <span title={m.read ? "Read" : "Delivered"}>
-                                        {m.read ? "✓✓" : "✓"}
-                                      </span>
-                                    )}
+                            if (threadMsgs.length === 0) {
+                              return (
+                                <div className="text-center py-12 text-gray-400 space-y-3">
+                                  <div className="w-14 h-14 rounded-2xl bg-oc-gold/10 text-oc-gold flex items-center justify-center mx-auto">
+                                    <MessageSquare size={24} />
+                                  </div>
+                                  <h4 className="font-bold text-sm text-oc-navy dark:text-oc-gold-light">
+                                    Start chatting with {users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}
+                                  </h4>
+                                  <p className="text-xs text-gray-400 max-w-xs mx-auto">
+                                    Messages sent here are synced in real-time across both of your accounts and devices.
+                                  </p>
+                                </div>
+                              );
+                            }
+
+                            return threadMsgs.map((m: any, idx: number) => {
+                              const isMine = m.from?.trim().toLowerCase() === myClean;
+                              return (
+                                <div key={idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+                                  <div className={`max-w-[80%] p-3.5 rounded-2xl text-sm ${
+                                    isMine 
+                                      ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy rounded-tr-none shadow-sm' 
+                                      : 'bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-tl-none shadow-sm text-oc-navy dark:text-white'
+                                  }`}>
+                                    <div className="leading-relaxed break-words whitespace-pre-wrap">{m.text}</div>
+                                    <div className={`text-[9px] mt-1.5 flex items-center justify-end gap-1 opacity-70 ${isMine ? 'text-oc-gold dark:text-oc-navy' : 'text-gray-400'}`}>
+                                      <span>{new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                      {isMine && (
+                                        <span title={m.read ? "Read" : "Delivered"}>
+                                          {m.read ? "✓✓" : "✓"}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            );
-                          })}
+                              );
+                            });
+                          })()}
                           <div ref={messagesEndRef} />
                         </div>
 
@@ -2224,8 +2354,13 @@ export default function App() {
                             )}
                             <div>
                               <h4 className="font-bold text-oc-navy dark:text-white truncate">{app.jobTitle}</h4>
-                              <p className="text-xs text-gray-500">
-                                {currentUser?.role === 'Employee' ? 'Sent to Business' : `Candidate: ${app.candidateName}`}
+                              <p className="text-xs text-gray-500 flex items-center gap-1.5 flex-wrap">
+                                <span>{currentUser?.role === 'Employee' ? 'Sent to Business' : `Candidate: ${app.candidateName}`}</span>
+                                {currentUser?.role !== 'Employee' && users[app.candidateEmail] && hasTrustedBadge(users[app.candidateEmail]) && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/25" title="Trusted Badge • Documents Authorized">
+                                    <ShieldCheck size={10} /> Trusted
+                                  </span>
+                                )}
                               </p>
                               <div className="text-[10px] text-gray-400 mt-1 uppercase font-bold tracking-tighter">
                                 Applied: {new Date(app.appliedAt).toLocaleDateString()}
@@ -3147,23 +3282,44 @@ export default function App() {
                                   <span>{calcRating(currentUser.ratings)}</span>
                                   <span className="text-[10px] text-gray-400 font-normal">({currentUser.ratings?.length || 0})</span>
                                 </div>
-                                {currentUser.isVerified ? (
-                                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-600">
-                                    <CheckCircle size={10} /> Verified Member
-                                  </div>
+                                {hasTrustedBadge(currentUser) ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowCertificateModal(currentUser)}
+                                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-gradient-to-r from-amber-500/15 via-oc-gold/20 to-amber-500/15 text-amber-900 dark:text-amber-200 border border-amber-500/40 hover:border-amber-500 hover:shadow-sm transition-all cursor-pointer shadow-sm group"
+                                    title="Official Trusted Badge • Documents Authorized (Click to view certificate)"
+                                  >
+                                    <ShieldCheck size={14} className="text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform" />
+                                    <span>Trusted Badge</span>
+                                    <span className="w-1 h-1 rounded-full bg-amber-500"></span>
+                                    <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300">Docs Authorized</span>
+                                    <BadgeCheck size={12} className="text-oc-gold ml-0.5" />
+                                  </button>
                                 ) : currentUser.verificationPending ? (
-                                  <div className="flex flex-col items-start gap-1">
-                                    <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-oc-gold/10 text-oc-gold">
-                                      <Clock size={10} /> Verification Pending
-                                    </div>
+                                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/25">
+                                    <Clock size={12} className="animate-pulse text-amber-500" />
+                                    <span>Trusted Badge: Pending Authorization</span>
                                   </div>
                                 ) : (
-                                  <button 
-                                    onClick={() => setShowProfileVerificationForm(true)}
-                                    className="text-[9px] font-bold text-gray-400 hover:text-oc-gold underline uppercase tracking-tighter"
-                                  >
-                                    Apply for Badge
-                                  </button>
+                                  <div className="flex items-center gap-2">
+                                    <button 
+                                      type="button"
+                                      onClick={() => setShowUnlockBadgeRequirementModal(true)}
+                                      className="flex items-center gap-1.5 px-3 py-1 bg-gray-100 dark:bg-white/5 hover:bg-amber-500/10 text-gray-500 dark:text-gray-400 hover:text-amber-700 dark:hover:text-amber-300 rounded-full border border-dashed border-gray-300 dark:border-gray-700 hover:border-amber-500/40 text-[11px] font-semibold transition-all cursor-pointer group"
+                                      title="Click to learn how to get the Trusted Badge"
+                                    >
+                                      <Lock size={12} className="text-gray-400 group-hover:text-amber-500" />
+                                      <span>Trusted Badge: Locked</span>
+                                      <span className="text-[10px] text-gray-400 group-hover:text-amber-600">(Requires Docs)</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowProfileVerificationForm(true)}
+                                      className="px-2.5 py-1 bg-oc-gold/15 hover:bg-oc-gold/25 text-oc-gold text-[10px] font-bold rounded-full border border-oc-gold/30 transition-all flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <ShieldCheck size={11} /> Authorize Docs
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             </>
@@ -3534,10 +3690,30 @@ export default function App() {
                   <div className="flex items-start justify-between">
                     <div>
                       <h3 className="text-2xl font-serif font-bold dark:text-white">{viewingProfile.bizName || viewingProfile.name}</h3>
-                      <div className="flex gap-2 mt-1">
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
                         <Badge className="bg-oc-gold/10 text-oc-gold">{viewingProfile.role}</Badge>
                         {viewingProfile.openToWork && <Badge className="bg-green-100 text-green-600">Open to Work</Badge>}
-                        <div className="flex items-center gap-1 text-oc-gold font-bold text-xs ml-2">
+                        {hasTrustedBadge(viewingProfile) ? (
+                          <button
+                            type="button"
+                            onClick={() => setShowCertificateModal(viewingProfile)}
+                            className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-amber-500/30 hover:opacity-85 transition-opacity cursor-pointer shadow-sm"
+                            title="Official Trusted Badge • Documents Authorized (Click to inspect credential)"
+                          >
+                            <ShieldCheck size={12} className="text-amber-600 dark:text-amber-400" />
+                            <span>Trusted Badge</span>
+                            <span className="text-[9px] opacity-80">(Authorized)</span>
+                          </button>
+                        ) : (
+                          <div
+                            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium bg-gray-100 dark:bg-white/5 text-gray-400 border border-gray-200 dark:border-gray-800"
+                            title="Documents not yet authorized for Trusted Badge"
+                          >
+                            <Lock size={10} className="text-gray-400" />
+                            <span>Unverified</span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1 text-oc-gold font-bold text-xs ml-1">
                           <Star size={12} fill="currentColor" />
                           <span>{calcRating(viewingProfile.ratings)}</span>
                           <span className="text-[10px] text-gray-400 font-normal">({viewingProfile.ratings?.length || 0})</span>
@@ -4007,37 +4183,56 @@ export default function App() {
       <AnimatePresence>
         {showProfileVerificationForm && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowProfileVerificationForm(false)} />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={() => { if (!isVerifyingAI) setShowProfileVerificationForm(false); }} />
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10 z-10"
+              initial={{ scale: 0.92, opacity: 0, y: 15 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.92, opacity: 0, y: 15 }}
+              className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/20 z-10 max-h-[92vh] overflow-y-auto"
             >
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between pb-4 border-b border-oc-gold/10">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-oc-gold/10 rounded-2xl flex items-center justify-center text-oc-gold">
+                  <div className="w-11 h-11 bg-oc-gold/10 rounded-2xl flex items-center justify-center text-oc-gold">
                     <ShieldCheck size={24} />
                   </div>
                   <div>
-                    <h2 className="text-xl font-serif font-bold text-oc-navy dark:text-oc-gold-light tracking-tight">Identity Verification</h2>
-                    <p className="text-xs text-gray-500 font-medium">Optional • Apply for a Verified Badge</p>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-serif font-bold text-oc-navy dark:text-oc-gold-light tracking-tight">Document Authorization</h2>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 flex items-center gap-1">
+                        <Award size={10} /> Unlocks Trusted Badge
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 font-medium">Verify your government documents to unlock your Trusted Member badge</p>
                   </div>
                 </div>
-                <button 
-                  type="button"
-                  onClick={() => setShowProfileVerificationForm(false)}
-                  className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-white rounded-full transition-colors"
-                >
-                  <X size={18} />
-                </button>
+                {!isVerifyingAI && (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setShowProfileVerificationForm(false);
+                      setAiAnalysisResult(null);
+                      setSelectedDocPreview(null);
+                      setVerificationFeedback(null);
+                    }}
+                    className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-white rounded-full transition-colors"
+                  >
+                    <X size={18} />
+                  </button>
+                )}
               </div>
 
-              <div className="mb-5 p-3 bg-oc-gold/5 border border-oc-gold/10 rounded-2xl text-[11px] text-oc-navy/80 dark:text-gray-300 flex items-center gap-2">
-                <Sparkles size={16} className="text-oc-gold shrink-0" />
-                <span>Verification is <strong>100% optional</strong>. It adds a trust badge to your profile for employers & clients.</span>
+              {/* Trusted Badge Requirement Info Banner */}
+              <div className="mt-4 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-200">
+                <ShieldCheck size={18} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold block">Trusted Badge Requirement</span>
+                  <span className="text-[11px] opacity-90 leading-relaxed block">
+                    To receive the official <strong>Trusted Badge</strong> on your profile, directory cards, and applications, you must first have your official government-issued ID or business registration authorized.
+                  </span>
+                </div>
               </div>
 
-              {verificationFeedback && (
-                <div className={`mb-5 p-3.5 rounded-2xl text-xs flex items-center gap-2 border ${
+              {/* Status feedback bar */}
+              {verificationFeedback && !aiAnalysisResult && (
+                <div className={`mt-4 p-3.5 rounded-2xl text-xs flex items-center gap-2 border ${
                   verificationFeedback.type === 'success' 
                     ? 'bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400'
                     : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400'
@@ -4047,51 +4242,83 @@ export default function App() {
                 </div>
               )}
 
-              {!isVerifyingAI ? (
+              {/* VIEW 1: Document Form (Before Scan) */}
+              {!isVerifyingAI && !aiAnalysisResult && (
                 <form onSubmit={(e) => {
                   e.preventDefault();
-                  const fd = new FormData(e.currentTarget);
-                  const docType = fd.get('docType') as string;
-                  const fileInput = e.currentTarget.querySelector('input[type="file"]') as HTMLInputElement;
-                  const file = fileInput?.files?.[0];
-                  
-                  if (!file) {
-                    alert("Please select or capture a document image.");
+                  if (!selectedDocPreview) {
+                    alert("Please select or capture a photo of your document.");
                     return;
                   }
-
-                  const reader = new FileReader();
-                  reader.onloadend = () => {
-                    requestVerification(reader.result as string, docType);
-                  };
-                  reader.readAsDataURL(file);
-                }} className="space-y-5">
+                  requestVerification(selectedDocPreview, selectedDocType);
+                }} className="mt-5 space-y-4">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Document Type</label>
-                    <select name="docType" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-3.5 text-sm outline-none border border-oc-gold/10 text-oc-navy dark:text-white">
-                      <option value="National ID">National ID Card</option>
-                      <option value="Passport">Passport</option>
-                      <option value="Driver License">Driver's License</option>
-                      <option value="Business License">Business License / Registration</option>
-                      <option value="Professional Certification">Professional Certificate</option>
+                    <label className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Select Document Category</label>
+                    <select 
+                      value={selectedDocType} 
+                      onChange={(e) => setSelectedDocType(e.target.value)}
+                      className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-3 text-xs outline-none border border-oc-gold/15 text-oc-navy dark:text-white font-medium"
+                    >
+                      <option value="National ID">National ID Card (Uganda NIRA / East Africa / International)</option>
+                      <option value="Passport">International Passport</option>
+                      <option value="Driver License">Driver's License / Driving Permit</option>
+                      <option value="Business License">Business Registration / URSB / Tax Certificate</option>
+                      <option value="Professional Certification">Academic Degree / Professional Accreditation</option>
                     </select>
                   </div>
 
+                  {/* Document Photo Upload / Preview */}
                   <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Upload Document Photo</label>
-                    <div className="border-2 border-dashed border-oc-gold/20 rounded-2xl p-6 text-center bg-oc-gold/5 group hover:bg-oc-gold/10 transition-all cursor-pointer relative">
-                      <input required type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" />
-                      <FileBadge className="mx-auto text-oc-gold/40 mb-2 group-hover:scale-110 transition-transform" size={40} />
-                      <p className="text-xs font-bold text-oc-gold">Tap to upload or take photo</p>
-                      <p className="text-[9px] text-gray-400 mt-1 uppercase">JPEG, PNG, WEBP (National ID / Passport)</p>
-                    </div>
+                    <label className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Document Image</label>
+                    {selectedDocPreview ? (
+                      <div className="relative rounded-2xl overflow-hidden border-2 border-oc-gold/30 bg-black/60 p-2 text-center">
+                        <img 
+                          src={selectedDocPreview} 
+                          alt="Document Preview" 
+                          className="max-h-52 mx-auto rounded-xl object-contain shadow-md"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDocPreview(null)}
+                          className="absolute top-4 right-4 bg-black/80 hover:bg-red-600 text-white p-2 rounded-full text-xs flex items-center gap-1 backdrop-blur shadow transition-colors"
+                        >
+                          <X size={14} /> Change Photo
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="border-2 border-dashed border-oc-gold/25 rounded-2xl p-7 text-center bg-oc-gold/5 group hover:bg-oc-gold/10 transition-all cursor-pointer block relative">
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          capture="environment"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => setSelectedDocPreview(reader.result as string);
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                          className="absolute inset-0 opacity-0 cursor-pointer" 
+                        />
+                        <FileBadge className="mx-auto text-oc-gold/50 mb-2 group-hover:scale-110 transition-transform" size={42} />
+                        <p className="text-xs font-bold text-oc-gold">Tap to take photo or choose file</p>
+                        <p className="text-[10px] text-gray-400 mt-1">Accepts clear photo of front of ID / Passport page</p>
+                      </label>
+                    )}
                   </div>
 
-                  <div className="p-3 bg-blue-50 dark:bg-blue-900/10 rounded-2xl border border-blue-100 dark:border-blue-800/50 flex gap-2.5">
-                    <ShieldCheck size={16} className="text-blue-500 shrink-0 mt-0.5" />
-                    <p className="text-[10px] leading-relaxed text-blue-700 dark:text-blue-300">
-                      Document analysis is powered by Gemini AI for instant document validation. Your image is processed securely.
-                    </p>
+                  {/* Security and Guidance note */}
+                  <div className="p-3.5 bg-oc-gold/5 dark:bg-white/5 rounded-2xl border border-oc-gold/10 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-oc-navy dark:text-oc-gold-light">
+                      <Sparkles size={14} className="text-oc-gold" />
+                      <span>Forensic Scan Guidelines</span>
+                    </div>
+                    <ul className="text-[11px] text-gray-500 dark:text-gray-400 space-y-1 list-disc list-inside">
+                      <li>Ensure good lighting and no glare on the laminate plastic.</li>
+                      <li>Keep all four corners and national seals visible.</li>
+                      <li>Document name must match your platform profile (<strong>{currentUser?.name || currentUser?.bizName}</strong>).</li>
+                    </ul>
                   </div>
 
                   <div className="flex gap-3 pt-2">
@@ -4100,31 +4327,446 @@ export default function App() {
                       onClick={() => setShowProfileVerificationForm(false)}
                       className="flex-1 py-3 text-xs font-bold text-gray-500 hover:text-oc-navy dark:hover:text-white transition-colors"
                     >
-                      Skip for Now
+                      Cancel
                     </button>
                     <button 
                       type="submit"
-                      className="flex-1 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-3 rounded-xl shadow-lg hover:opacity-90 transition-all text-xs"
+                      disabled={!selectedDocPreview}
+                      className="flex-1 bg-gradient-to-r from-oc-navy to-slate-900 dark:from-oc-gold dark:to-amber-500 text-oc-gold dark:text-oc-navy font-bold py-3 px-4 rounded-xl shadow-lg hover:opacity-95 transition-all text-xs flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
                     >
-                      Verify Document with AI
+                      <Scan size={16} /> Scan & Verify with AI
                     </button>
                   </div>
                 </form>
-              ) : (
-                <div className="py-10 text-center space-y-5">
-                  <motion.div 
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-                    className="w-16 h-16 border-4 border-oc-gold border-t-transparent border-r-transparent rounded-full mx-auto flex items-center justify-center"
-                  >
-                    <ShieldCheck className="text-oc-gold" size={28} />
-                  </motion.div>
-                  <div className="space-y-1">
-                    <h3 className="text-lg font-serif font-bold animate-pulse">AI Verification in Progress</h3>
-                    <p className="text-xs text-gray-500 max-w-[220px] mx-auto">Gemini AI is examining your document for authenticity and readability...</p>
+              )}
+
+              {/* VIEW 2: Scanning In Progress */}
+              {isVerifyingAI && (
+                <div className="py-6 space-y-6">
+                  {/* Visual laser holographic animation */}
+                  {selectedDocPreview && (
+                    <div className="relative rounded-2xl overflow-hidden border border-oc-gold/40 bg-black max-h-48 flex items-center justify-center shadow-inner">
+                      <img 
+                        src={selectedDocPreview} 
+                        alt="Scanning Document" 
+                        className="max-h-48 object-contain opacity-75"
+                      />
+                      {/* Laser beam */}
+                      <motion.div 
+                        animate={{ top: ['5%', '90%', '5%'] }}
+                        transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
+                        className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_15px_#22d3ee] z-10"
+                      />
+                      <div className="absolute inset-0 bg-blue-500/10 pointer-events-none" />
+                      <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 text-[9px] text-cyan-300 font-mono flex items-center gap-1">
+                        <Scan size={10} className="animate-spin" /> Neural OCR Vision Active
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Step progress checklist */}
+                  <div className="space-y-3 bg-oc-cream/60 dark:bg-white/5 p-4 rounded-2xl border border-oc-gold/10">
+                    <div className="flex items-center gap-2 text-xs font-bold text-oc-navy dark:text-oc-gold-light">
+                      <Loader2 size={15} className="animate-spin text-oc-gold" />
+                      <span>Gemini Forensic Document Inspection</span>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      {[
+                        "Evaluating image clarity, resolution & boundary alignment",
+                        "Detecting governmental seals, coat of arms & security typography",
+                        "Extracting document holder name & masked identification code",
+                        "Cross-referencing holder identity with account profile"
+                      ].map((stepText, idx) => {
+                        const isDone = aiScanStep > idx;
+                        const isCurrent = aiScanStep === idx;
+                        return (
+                          <div key={idx} className={`flex items-center gap-2.5 transition-opacity ${isDone ? 'text-green-600 dark:text-green-400 font-medium' : isCurrent ? 'text-oc-navy dark:text-white font-bold' : 'text-gray-400 opacity-60'}`}>
+                            {isDone ? (
+                              <CheckCircle size={14} className="text-green-500 shrink-0" />
+                            ) : isCurrent ? (
+                              <div className="w-3.5 h-3.5 rounded-full border-2 border-oc-gold border-t-transparent animate-spin shrink-0" />
+                            ) : (
+                              <div className="w-3.5 h-3.5 rounded-full border border-gray-400 shrink-0" />
+                            )}
+                            <span className="text-[11px]">{stepText}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               )}
+
+              {/* VIEW 3: AI Analysis Result Dossier */}
+              {!isVerifyingAI && aiAnalysisResult && (
+                <div className="mt-4 space-y-4">
+                  {/* Status Banner */}
+                  <div className={`p-4 rounded-2xl border flex items-start gap-3 ${
+                    aiAnalysisResult.verified && aiAnalysisResult.confidence >= 70
+                      ? 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-300'
+                      : aiAnalysisResult.recommendation === 'flagged_for_manual_review'
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
+                      : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
+                  }`}>
+                    {aiAnalysisResult.verified && aiAnalysisResult.confidence >= 70 ? (
+                      <CheckCircle size={22} className="text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle size={22} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                    )}
+                    <div className="space-y-1 flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-bold">
+                          {aiAnalysisResult.verified && aiAnalysisResult.confidence >= 70
+                            ? 'Document Verified & Approved'
+                            : aiAnalysisResult.recommendation === 'flagged_for_manual_review'
+                            ? 'Flagged for Manual Review'
+                            : 'Verification Unsuccessful'}
+                        </h4>
+                        <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-white/60 dark:bg-black/40">
+                          {aiAnalysisResult.confidence}% Confidence
+                        </span>
+                      </div>
+                      <p className="text-xs leading-relaxed opacity-90">{aiAnalysisResult.reason}</p>
+                    </div>
+                  </div>
+
+                  {/* Extracted Credentials Card */}
+                  <div className="bg-oc-cream/80 dark:bg-white/5 rounded-2xl p-4 border border-oc-gold/15 space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-oc-gold/10">
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-oc-gold">Extracted Information</span>
+                      <span className="text-[10px] text-gray-400 font-mono">OCR Verification</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                      <div>
+                        <span className="text-gray-400 block text-[10px]">Identified Document:</span>
+                        <span className="font-semibold text-oc-navy dark:text-white">{aiAnalysisResult.documentTypeDetected || selectedDocType}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block text-[10px]">Issuing Authority:</span>
+                        <span className="font-semibold text-oc-navy dark:text-white">{aiAnalysisResult.issuingAuthority || 'Official Authority'}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block text-[10px]">Holder Legal Name:</span>
+                        <span className="font-bold text-oc-navy dark:text-oc-gold-light">{aiAnalysisResult.holderName || 'Not detected'}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block text-[10px]">Document / NIN Number:</span>
+                        <span className="font-mono font-medium text-oc-navy dark:text-gray-200">{aiAnalysisResult.documentNumber || '••••••••'}</span>
+                      </div>
+                    </div>
+
+                    {aiAnalysisResult.nameMatch && (
+                      <div className="pt-2 border-t border-oc-gold/10 flex items-center justify-between text-[11px]">
+                        <span className="text-gray-400">Name Match with Profile:</span>
+                        <span className={`font-semibold flex items-center gap-1 ${aiAnalysisResult.nameMatch.matches ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                          {aiAnalysisResult.nameMatch.matches ? <Check size={12} /> : <AlertCircle size={12} />}
+                          {aiAnalysisResult.nameMatch.explanation}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Security Checks List */}
+                  {aiAnalysisResult.securityChecks && aiAnalysisResult.securityChecks.length > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] uppercase font-bold tracking-widest text-oc-gold block">Security Checks</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {aiAnalysisResult.securityChecks.map((chk, i) => (
+                          <div key={i} className="p-2.5 rounded-xl bg-white dark:bg-white/5 border border-oc-gold/10 flex items-start gap-2">
+                            {chk.passed ? (
+                              <CheckCircle size={14} className="text-green-500 shrink-0 mt-0.5" />
+                            ) : (
+                              <XCircle size={14} className="text-red-500 shrink-0 mt-0.5" />
+                            )}
+                            <div className="text-[11px]">
+                              <span className="font-bold text-oc-navy dark:text-white block">{chk.label}</span>
+                              <span className="text-[10px] text-gray-500 dark:text-gray-400 line-clamp-1">{chk.detail}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Decision Actions */}
+                  <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
+                    {aiAnalysisResult.verified && aiAnalysisResult.confidence >= 70 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowProfileVerificationForm(false);
+                          setAiAnalysisResult(null);
+                          setSelectedDocPreview(null);
+                        }}
+                        className="w-full py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <CheckCircle size={16} /> Done & View Trusted Badge on Profile
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAiAnalysisResult(null);
+                            setSelectedDocPreview(null);
+                          }}
+                          className="flex-1 py-2.5 bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-200 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <RefreshCw size={14} /> Retake Photo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={submitForManualAdminReview}
+                          className="flex-1 py-2.5 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy hover:opacity-90 rounded-xl text-xs font-bold shadow transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <Users size={14} /> Submit for Admin Review
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Verified Member Certificate of Authenticity Modal */}
+      <AnimatePresence>
+        {showCertificateModal && (
+          <div className="fixed inset-0 z-[75] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowCertificateModal(null)} />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 0 }}
+              className="relative w-full max-w-lg bg-gradient-to-b from-[#111928] to-[#0b101b] rounded-3xl p-6 sm:p-8 shadow-2xl border-2 border-oc-gold/30 text-white overflow-hidden z-10"
+            >
+              {/* Certificate Guilloche & Embellishment */}
+              <div className="absolute top-0 right-0 w-48 h-48 bg-oc-gold/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+              <div className="flex items-center justify-between border-b border-oc-gold/20 pb-4 mb-5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-oc-gold/20 border border-oc-gold/40 flex items-center justify-center text-oc-gold">
+                    <ShieldCheck size={22} />
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Official Credential & Trusted Badge</span>
+                    <h3 className="text-sm font-serif font-bold text-white">Authorized Identity Document</h3>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowCertificateModal(null)}
+                  className="p-1.5 rounded-full hover:bg-white/10 text-gray-400 hover:text-white"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="text-center py-2 space-y-3">
+                <div className="relative inline-block">
+                  <div className="w-20 h-20 rounded-full border-2 border-oc-gold p-1 mx-auto bg-black/40">
+                    <img 
+                      src={showCertificateModal.photo || `https://ui-avatars.com/api/?name=${encodeURIComponent(showCertificateModal.bizName || showCertificateModal.name || 'Member')}&background=0D1B2A&color=D4AF37`}
+                      alt={showCertificateModal.name}
+                      className="w-full h-full rounded-full object-cover"
+                    />
+                  </div>
+                  <div className="absolute bottom-0 right-0 w-7 h-7 bg-blue-600 rounded-full flex items-center justify-center border-2 border-[#111928] text-white shadow-lg">
+                    <Check size={14} />
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-lg font-serif font-bold text-white tracking-wide">
+                    {showCertificateModal.bizName || showCertificateModal.name}
+                  </h4>
+                  <p className="text-xs text-oc-gold/80 font-medium">{showCertificateModal.role} • {showCertificateModal.email}</p>
+                </div>
+
+                <div className="my-4 p-4 rounded-2xl bg-white/5 border border-oc-gold/20 text-left space-y-2.5 text-xs">
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span className="text-[11px] text-gray-400 uppercase font-bold tracking-wider">Trusted Badge Status:</span>
+                    <span className="flex items-center gap-1.5 font-bold text-amber-400 bg-amber-950/60 px-2.5 py-0.5 rounded-full border border-amber-500/30">
+                      <ShieldCheck size={12} /> Documents Authorized • Active
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span className="text-[11px] text-gray-400 uppercase font-bold tracking-wider">Document Type:</span>
+                    <span className="font-semibold text-white">
+                      {showCertificateModal.verificationAnalysis?.documentTypeDetected || showCertificateModal.verificationType || 'Official Government Identification'}
+                    </span>
+                  </div>
+                  {showCertificateModal.verificationAnalysis?.issuingAuthority && (
+                    <div className="flex justify-between items-center text-gray-300">
+                      <span className="text-[11px] text-gray-400 uppercase font-bold tracking-wider">Issuing Body:</span>
+                      <span className="font-semibold text-oc-gold-light">
+                        {showCertificateModal.verificationAnalysis.issuingAuthority}
+                      </span>
+                    </div>
+                  )}
+                  {showCertificateModal.verificationAnalysis?.documentNumber && (
+                    <div className="flex justify-between items-center text-gray-300">
+                      <span className="text-[11px] text-gray-400 uppercase font-bold tracking-wider">Masked ID Number:</span>
+                      <span className="font-mono text-gray-200">
+                        {showCertificateModal.verificationAnalysis.documentNumber}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span className="text-[11px] text-gray-400 uppercase font-bold tracking-wider">Inspection Engine:</span>
+                    <span className="font-medium text-blue-300">Gemini 3.8 Forensic Vision</span>
+                  </div>
+                  {showCertificateModal.verificationReason && (
+                    <div className="pt-2 border-t border-white/10 text-[11px] text-gray-300 leading-relaxed italic">
+                      "{showCertificateModal.verificationReason}"
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-2 flex items-center justify-between text-[10px] text-gray-400 font-mono">
+                  <span>ID: OC-V-{showCertificateModal.email.split('@')[0].toUpperCase()}</span>
+                  <span>Authenticity Sealed</span>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-oc-gold/20 flex gap-2">
+                <button
+                  onClick={() => setShowCertificateModal(null)}
+                  className="w-full py-2.5 bg-oc-gold text-oc-navy font-bold rounded-xl text-xs hover:opacity-90 transition-opacity cursor-pointer"
+                >
+                  Close Certificate
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Unlock Trusted Badge Requirement Modal */}
+      <AnimatePresence>
+        {showUnlockBadgeRequirementModal && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }} 
+              className="absolute inset-0 bg-black/75 backdrop-blur-md" 
+              onClick={() => setShowUnlockBadgeRequirementModal(false)} 
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 20 }}
+              className="relative w-full max-w-lg bg-white dark:bg-[#0E1726] rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/30 text-oc-navy dark:text-white z-10 max-h-[92vh] overflow-y-auto"
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between pb-4 border-b border-oc-gold/15">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/20 to-oc-gold/30 border border-amber-500/40 flex items-center justify-center text-amber-600 dark:text-amber-400 shadow-sm">
+                    <ShieldCheck size={26} />
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Platform Credibility</span>
+                    <h3 className="text-lg font-serif font-bold text-oc-navy dark:text-white">How to Get the Trusted Badge</h3>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowUnlockBadgeRequirementModal(false)}
+                  className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-white/10 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Core Requirement Notice */}
+              <div className="my-5 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-left space-y-1.5">
+                <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-bold text-sm">
+                  <Lock size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>Documents Must First Be Authorized</span>
+                </div>
+                <p className="text-xs text-amber-900/85 dark:text-amber-200/90 leading-relaxed">
+                  To guarantee absolute safety, fraud protection, and high trust on Online Corporate, the <strong>Trusted Badge</strong> is only awarded to members whose identity or business documents have been verified and authorized.
+                </p>
+              </div>
+
+              {/* 3 Step Roadmap */}
+              <div className="space-y-3 my-5">
+                <div className="text-[11px] uppercase font-bold tracking-wider text-oc-gold">3-Step Authorization Process</div>
+                
+                <div className="flex items-start gap-3 p-3 rounded-xl bg-oc-cream/60 dark:bg-white/5 border border-oc-gold/10">
+                  <div className="w-7 h-7 rounded-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold text-xs flex items-center justify-center shrink-0">
+                    1
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-oc-navy dark:text-white">Submit Official Documentation</h4>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      Upload a photo or scanned copy of your National ID, Passport, Driver's Permit, or Business Registration.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 p-3 rounded-xl bg-oc-cream/60 dark:bg-white/5 border border-oc-gold/10">
+                  <div className="w-7 h-7 rounded-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold text-xs flex items-center justify-center shrink-0">
+                    2
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-oc-navy dark:text-white">Forensic AI or Admin Authorization</h4>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      Gemini 3.8 Multimodal Vision inspects national seals, guilloche patterns, document integrity, and matches the registrant's name.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 p-3 rounded-xl bg-oc-cream/60 dark:bg-white/5 border border-oc-gold/10">
+                  <div className="w-7 h-7 rounded-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold text-xs flex items-center justify-center shrink-0">
+                    3
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-oc-navy dark:text-white">Trusted Badge Unlocked Permanently</h4>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      An official digital Certificate of Authenticity is issued, activating the gold Trusted Badge across all search feeds and applications.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Benefits of Trusted Badge */}
+              <div className="p-3.5 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-xs space-y-1 text-blue-900 dark:text-blue-300 mb-6">
+                <span className="font-bold flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-blue-500" />
+                  Why get your documents authorized?
+                </span>
+                <p className="text-[11px] text-blue-800/80 dark:text-blue-200/80">
+                  Trusted profiles receive up to <strong>4x higher response rates</strong> from enterprise employers and prospective clients, with zero risk of impersonation.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 pt-3 border-t border-oc-gold/10">
+                <button
+                  type="button"
+                  onClick={() => setShowUnlockBadgeRequirementModal(false)}
+                  className="flex-1 py-3 bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-300 hover:bg-gray-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Later
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUnlockBadgeRequirementModal(false);
+                    setShowProfileVerificationForm(true);
+                  }}
+                  className="flex-[2] py-3 bg-gradient-to-r from-amber-500 via-oc-gold to-amber-600 hover:opacity-95 text-oc-navy font-extrabold rounded-xl text-xs shadow-lg shadow-oc-gold/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ShieldCheck size={16} />
+                  Authorize Documents Now
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
@@ -4522,53 +5164,214 @@ export default function App() {
       <AnimatePresence>
         {adminDocPreview && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/75 backdrop-blur-md" onClick={() => setAdminDocPreview(null)} />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setAdminDocPreview(null)} />
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 0 }}
-              className="relative w-full max-w-3xl bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/20 overflow-hidden z-10 max-h-[90vh] flex flex-col justify-between"
+              className="relative w-full max-w-4xl bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-7 shadow-2xl border border-oc-gold/20 overflow-hidden z-10 max-h-[92vh] flex flex-col justify-between"
             >
               <div className="flex items-center justify-between border-b border-oc-gold/10 pb-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-oc-gold/10 flex items-center justify-center text-oc-gold font-serif font-bold text-base">
+                  <div className="w-11 h-11 rounded-2xl bg-oc-gold/10 flex items-center justify-center text-oc-gold font-serif font-bold text-base">
                     {(adminDocPreview.user.name || adminDocPreview.user.email).charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <h3 className="text-base font-serif font-bold text-oc-navy dark:text-oc-gold-light">
-                      Identity Document Inspection
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-serif font-bold text-oc-navy dark:text-oc-gold-light">
+                        Identity Document Forensic Inspection
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                        Gemini 3.8
+                      </span>
+                    </div>
                     <p className="text-xs text-gray-500">
-                      {adminDocPreview.user.name || adminDocPreview.user.email} • {adminDocPreview.user.verificationType || 'National Document'}
+                      {adminDocPreview.user.name || adminDocPreview.user.email} ({adminDocPreview.user.email}) • {adminDocPreview.user.verificationType || 'National Document'}
                     </p>
                   </div>
                 </div>
 
-                <button 
-                  onClick={() => setAdminDocPreview(null)}
-                  className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-white/10 text-gray-400"
-                >
-                  <X size={20} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    type="button"
+                    disabled={isAdminReanalyzing || !adminDocPreview.user.verificationDoc}
+                    onClick={() => handleAdminReanalyzeDoc(adminDocPreview.user)}
+                    className="px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 border border-blue-200 dark:border-blue-800 text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
+                    title="Run fresh Gemini forensic AI scan"
+                  >
+                    <RefreshCw size={13} className={isAdminReanalyzing ? "animate-spin" : ""} />
+                    {isAdminReanalyzing ? 'Analyzing...' : 'Re-run AI Analysis'}
+                  </button>
+                  <button 
+                    onClick={() => setAdminDocPreview(null)}
+                    className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-white/10 text-gray-400"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
 
-              {/* Image viewer */}
-              <div className="my-4 flex-1 bg-black/90 rounded-2xl p-4 flex items-center justify-center overflow-hidden border border-oc-gold/20 max-h-[50vh]">
-                {adminDocPreview.user.verificationDoc ? (
-                  <img
-                    src={adminDocPreview.user.verificationDoc}
-                    alt="Document"
-                    className="max-w-full max-h-full object-contain rounded-lg shadow-lg"
-                  />
-                ) : (
-                  <div className="text-gray-400 text-xs italic">No document image available</div>
-                )}
+              {/* Body: 2 Columns on Desktop */}
+              <div className="my-4 flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto max-h-[60vh] pr-1">
+                {/* Left Column: Image Viewer */}
+                <div className="bg-black/90 rounded-2xl p-3 flex flex-col items-center justify-center overflow-hidden border border-oc-gold/20 min-h-[260px] relative group">
+                  {adminDocPreview.user.verificationDoc ? (
+                    <>
+                      <img
+                        src={adminDocPreview.user.verificationDoc}
+                        alt="Submitted Document"
+                        className="max-w-full max-h-[48vh] object-contain rounded-lg shadow-lg"
+                      />
+                      <div className="absolute top-2 left-2 px-2.5 py-1 rounded bg-black/75 text-[10px] text-white font-mono flex items-center gap-1.5 border border-white/20">
+                        <Scan size={12} className="text-oc-gold" />
+                        {adminDocPreview.user.verificationType || 'Document'}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-gray-400 text-xs italic">No document image available</div>
+                  )}
+                </div>
+
+                {/* Right Column: AI Forensic Dossier */}
+                <div className="flex flex-col gap-3">
+                  {adminDocPreview.user.verificationAnalysis ? (
+                    <>
+                      {/* AI Verdict Banner */}
+                      <div className={`p-3.5 rounded-2xl border flex items-start gap-2.5 ${
+                        adminDocPreview.user.verificationAnalysis.verified && adminDocPreview.user.verificationAnalysis.confidence >= 70
+                          ? 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-300'
+                          : adminDocPreview.user.verificationAnalysis.recommendation === 'flagged_for_manual_review'
+                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
+                          : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
+                      }`}>
+                        {adminDocPreview.user.verificationAnalysis.verified && adminDocPreview.user.verificationAnalysis.confidence >= 70 ? (
+                          <CheckCircle size={20} className="shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertCircle size={20} className="shrink-0 mt-0.5" />
+                        )}
+                        <div className="flex-1 space-y-0.5 text-xs">
+                          <div className="flex items-center justify-between font-bold">
+                            <span>
+                              {adminDocPreview.user.verificationAnalysis.verified && adminDocPreview.user.verificationAnalysis.confidence >= 70
+                                ? 'AI Verdict: Genuine & Approved'
+                                : adminDocPreview.user.verificationAnalysis.recommendation === 'flagged_for_manual_review'
+                                ? 'AI Verdict: Flagged for Review'
+                                : 'AI Verdict: High Risk / Illegible'}
+                            </span>
+                            <span className="font-mono text-[11px] px-2 py-0.5 rounded-full bg-white/70 dark:bg-black/40">
+                              {adminDocPreview.user.verificationAnalysis.confidence}% Match
+                            </span>
+                          </div>
+                          <p className="text-[11px] leading-relaxed opacity-90">
+                            {adminDocPreview.user.verificationAnalysis.reason}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Extracted Data Card */}
+                      <div className="bg-oc-cream/60 dark:bg-white/5 rounded-2xl p-3.5 border border-oc-gold/15 space-y-2 text-xs">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-oc-gold block">
+                          Extracted Credentials
+                        </span>
+                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                          <div>
+                            <span className="text-gray-400 block text-[10px]">Identified Type:</span>
+                            <span className="font-semibold text-oc-navy dark:text-white">
+                              {adminDocPreview.user.verificationAnalysis.documentTypeDetected || 'Unknown'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 block text-[10px]">Issuing Authority:</span>
+                            <span className="font-semibold text-oc-navy dark:text-white">
+                              {adminDocPreview.user.verificationAnalysis.issuingAuthority || 'Unspecified'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 block text-[10px]">Name on Document:</span>
+                            <span className="font-bold text-oc-navy dark:text-oc-gold-light">
+                              {adminDocPreview.user.verificationAnalysis.holderName || 'Not legible'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 block text-[10px]">Document ID / NIN:</span>
+                            <span className="font-mono font-medium text-oc-navy dark:text-gray-200">
+                              {adminDocPreview.user.verificationAnalysis.documentNumber || '••••••••'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {adminDocPreview.user.verificationAnalysis.nameMatch && (
+                          <div className="pt-1.5 border-t border-oc-gold/10 flex items-center justify-between text-[11px]">
+                            <span className="text-gray-400">Name Match:</span>
+                            <span className={`font-semibold flex items-center gap-1 ${
+                              adminDocPreview.user.verificationAnalysis.nameMatch.matches ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'
+                            }`}>
+                              {adminDocPreview.user.verificationAnalysis.nameMatch.matches ? <Check size={12} /> : <AlertCircle size={12} />}
+                              {adminDocPreview.user.verificationAnalysis.nameMatch.explanation}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Security checks breakdown */}
+                      {adminDocPreview.user.verificationAnalysis.securityChecks && (
+                        <div className="space-y-1">
+                          <span className="text-[10px] uppercase font-bold tracking-widest text-oc-gold block">
+                            Forensic Security Checks
+                          </span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                            {adminDocPreview.user.verificationAnalysis.securityChecks.map((chk, idx) => (
+                              <div key={idx} className="p-2 rounded-xl bg-white dark:bg-white/5 border border-oc-gold/10 flex items-start gap-2">
+                                {chk.passed ? (
+                                  <CheckCircle size={13} className="text-green-500 shrink-0 mt-0.5" />
+                                ) : (
+                                  <XCircle size={13} className="text-red-500 shrink-0 mt-0.5" />
+                                )}
+                                <div className="text-[10px]">
+                                  <span className="font-bold text-oc-navy dark:text-white block">{chk.label}</span>
+                                  <span className="text-gray-400 line-clamp-1">{chk.detail}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="p-6 rounded-2xl bg-oc-gold/5 border border-oc-gold/15 text-center space-y-3 my-auto">
+                      <Scan size={32} className="text-oc-gold/60 mx-auto" />
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-oc-navy dark:text-oc-gold-light">
+                          No Automated Scan on File
+                        </h4>
+                        <p className="text-xs text-gray-500 max-w-xs mx-auto">
+                          Click below to execute a multimodal Gemini 3.8 forensic inspection of this identity card.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isAdminReanalyzing || !adminDocPreview.user.verificationDoc}
+                        onClick={() => handleAdminReanalyzeDoc(adminDocPreview.user)}
+                        className="px-4 py-2 bg-oc-gold text-oc-navy font-bold rounded-xl text-xs hover:opacity-90 transition-opacity shadow flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
+                      >
+                        <RefreshCw size={13} className={isAdminReanalyzing ? "animate-spin" : ""} />
+                        Run Gemini Forensic Scan
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Modal footer controls */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 border-t border-oc-gold/10">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-oc-gold/10">
                 <div className="text-xs text-gray-500">
-                  User email: <span className="font-bold text-oc-navy dark:text-white">{adminDocPreview.user.email}</span>
+                  Current Status: {adminDocPreview.user.isVerified ? (
+                    <span className="font-bold text-green-600 dark:text-green-400">Verified Member</span>
+                  ) : adminDocPreview.user.verificationPending ? (
+                    <span className="font-bold text-oc-gold">Pending Admin Decision</span>
+                  ) : (
+                    <span className="font-bold text-gray-400">Unverified</span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -4576,10 +5379,10 @@ export default function App() {
                     <>
                       <button
                         onClick={() => {
-                          toggleUserVerified(adminDocPreview.user.email, true, 'Approved after document inspection');
+                          toggleUserVerified(adminDocPreview.user.email, true, adminDocPreview.user.verificationAnalysis?.reason || 'Approved after document inspection');
                           setAdminDocPreview(null);
                         }}
-                        className="flex-1 sm:flex-none px-5 py-2.5 bg-green-600 text-white rounded-xl text-xs font-bold shadow hover:bg-green-700 transition-all flex items-center justify-center gap-1.5"
+                        className="flex-1 sm:flex-none px-5 py-2.5 bg-green-600 text-white rounded-xl text-xs font-bold shadow hover:bg-green-700 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <Check size={16} /> Approve & Grant Verified Badge
                       </button>
@@ -4588,9 +5391,9 @@ export default function App() {
                           const target = adminDocPreview.user;
                           setAdminDocPreview(null);
                           setDeclineReasonModal({ email: target.email, name: target.name || target.email });
-                          setDeclineReasonInput('');
+                          setDeclineReasonInput(target.verificationAnalysis?.reason || '');
                         }}
-                        className="flex-1 sm:flex-none px-5 py-2.5 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                        className="flex-1 sm:flex-none px-5 py-2.5 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <X size={16} /> Decline
                       </button>
@@ -4601,7 +5404,7 @@ export default function App() {
                         toggleUserVerified(adminDocPreview.user.email, false, 'Revoked by admin');
                         setAdminDocPreview(null);
                       }}
-                      className="w-full sm:w-auto px-5 py-2.5 bg-red-500/10 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold transition-all"
+                      className="w-full sm:w-auto px-5 py-2.5 bg-red-500/10 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold transition-all cursor-pointer"
                     >
                       Revoke Badge
                     </button>

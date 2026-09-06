@@ -33,6 +33,22 @@ export function useAppStorage() {
       localStorage.removeItem(`oc_u_${email}`);
     });
 
+    // Remove legacy fake seed messages from localStorage
+    try {
+      const storedMsgs = JSON.parse(localStorage.getItem('oc_msgs') || '{}');
+      let modified = false;
+      for (const key of Object.keys(storedMsgs)) {
+        const parts = key.toLowerCase().split('::').map(s => s.trim());
+        if (parts.some(p => fakeSeedEmails.includes(p))) {
+          delete storedMsgs[key];
+          modified = true;
+        }
+      }
+      if (modified) {
+        localStorage.setItem('oc_msgs', JSON.stringify(storedMsgs));
+      }
+    } catch (_) {}
+
     // Load users
     const loadedUsers: Record<string, User> = {};
     for (let i = 0; i < localStorage.length; i++) {
@@ -60,6 +76,8 @@ export function useAppStorage() {
       password: 'adrielissocool1',
       isAdmin: true,
       isVerified: true,
+      documentsAuthorized: true,
+      trustedBadge: true,
       name: existingAdmin?.name || 'Adriel Aturinda',
       bizName: existingAdmin?.bizName || 'Online Corporate Administration',
       role: existingAdmin?.role || 'BusinessOwner',
@@ -94,7 +112,9 @@ export function useAppStorage() {
         location: meta.location || existing?.location || '',
         description: meta.description || existing?.description || '',
         photo: meta.avatar_url || meta.picture || existing?.photo || '',
-        isVerified: existing ? existing.isVerified : true,
+        isVerified: existing ? Boolean(existing.isVerified) : false,
+        documentsAuthorized: existing ? Boolean(existing.documentsAuthorized || existing.isVerified) : false,
+        trustedBadge: existing ? Boolean(existing.trustedBadge || existing.isVerified) : false,
         isAdmin: supEmail === 'adrielaturinda4@gmail.com',
         ...existing,
       };
@@ -438,7 +458,7 @@ export function useAppStorage() {
     if (!messages[key]) return;
     
     const updatedThread = messages[key].map(m => 
-      m.from !== cleanMy ? { ...m, read: true } : m
+      m.from?.trim().toLowerCase() !== cleanMy ? { ...m, read: true } : m
     );
     
     const newMsgs = { ...messages, [key]: updatedThread };
@@ -447,6 +467,36 @@ export function useAppStorage() {
 
     // Sync read state with Supabase
     markMessagesAsReadInSupabase(cleanMy, cleanOther).catch(() => {});
+  };
+
+  const markAllMessagesAsRead = () => {
+    if (!currentUser?.email) return;
+    const cleanMy = currentUser.email.trim().toLowerCase();
+    let hasChanges = false;
+    const updated = { ...messages };
+
+    for (const [key, thread] of Object.entries(updated)) {
+      const parts = key.toLowerCase().split('::').map(s => s.trim());
+      if (parts.includes(cleanMy) && Array.isArray(thread)) {
+        const newThread = thread.map(m => {
+          if (m.from?.trim().toLowerCase() !== cleanMy && !m.read) {
+            hasChanges = true;
+            return { ...m, read: true };
+          }
+          return m;
+        });
+        updated[key] = newThread;
+        const otherEmail = parts.find(p => p !== cleanMy);
+        if (otherEmail) {
+          markMessagesAsReadInSupabase(cleanMy, otherEmail).catch(() => {});
+        }
+      }
+    }
+
+    if (hasChanges) {
+      setMessages(updated);
+      localStorage.setItem('oc_msgs', JSON.stringify(updated));
+    }
   };
 
   const markNotifsRead = () => {
@@ -504,16 +554,18 @@ export function useAppStorage() {
     const updated: User = {
       ...targetUser,
       isVerified,
+      documentsAuthorized: isVerified,
+      trustedBadge: isVerified,
       verificationPending: false,
-      verificationReason: reason || (isVerified ? 'Approved by Platform Administrator' : 'Verification declined by Administrator')
+      verificationReason: reason || (isVerified ? 'Documents Authorized by Platform Administrator' : 'Verification declined by Administrator')
     };
 
     saveUser(updated);
 
     addNotificationTo(cleanEmail, {
       type: 'account',
-      text: isVerified ? 'Identity Verified! Badge Granted' : 'Verification Status Updated',
-      sub: reason || (isVerified ? 'An administrator has verified your national identity document.' : 'Your verification request was reviewed.')
+      text: isVerified ? 'Documents Authorized! Trusted Badge Awarded' : 'Document Status Updated',
+      sub: reason || (isVerified ? 'Your submitted documents have been officially authorized. The Trusted Badge is now active on your profile.' : 'Your verification request was reviewed.')
     });
   };
 
@@ -648,6 +700,7 @@ export function useAppStorage() {
     cancelAppointment,
     sendMessage,
     markThreadAsRead,
+    markAllMessagesAsRead,
     markNotifsRead,
     setNotifications,
     saveJobSearch,

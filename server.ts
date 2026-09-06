@@ -41,7 +41,8 @@ async function startServer() {
   const PORT = 3000;
 
   // JSON parsing middleware with increased limit for base64 images
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({ limit: '25mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
   // API Routes
   app.get("/api/health", (req, res) => {
@@ -177,33 +178,53 @@ async function startServer() {
   });
 
   app.post("/api/verify-document", async (req, res) => {
-    const { docBase64, docType } = req.body;
+    const { docBase64, docType, userName, userEmail } = req.body;
 
     if (!docBase64) {
-      return res.status(400).json({ error: "Missing document data" });
+      return res.status(400).json({ error: "Missing document image" });
     }
 
     try {
       const ai = getAi();
       // Clean the base64 string if it contains data URI prefix
       const base64Data = docBase64.split(",")[1] || docBase64;
-      const mimeType = docBase64.split(";")[0]?.split(":")[1] || "image/jpeg";
+      let mimeType = docBase64.split(";")[0]?.split(":")[1] || "image/jpeg";
+      if (mimeType === "image/jpg") mimeType = "image/jpeg";
 
-      const prompt = `You are an automated document verification assistant. 
-      The user is claiming to provide a ${docType}. 
-      Analyze the provided image and determine if it appears to be a valid, authentic document of that type.
-      Check for:
-      1. Legibility.
-      2. Authenticity (does it look like a real ID/license/cert?).
-      3. Consistency (does it match the expected docType?).
-      
-      Return a JSON response with:
-      - verified (boolean): true if the document looks authentic and matches docType.
-      - confidence (number): 0-1 score.
-      - reason (string): Brief explanation of the decision.`;
+      const prompt = `You are a certified forensic identity document verification agent for Online Corporate.
+The user has submitted an image claiming it is a: "${docType || 'Identity Document'}".
+The user's registered name on this platform is: "${userName || 'Not provided'}".
+The user's email is: "${userEmail || 'Not provided'}".
+
+Analyze the provided image with high forensic scrutiny:
+1. DOCUMENT CLASSIFICATION:
+   - Identify the exact document type (e.g. "National ID Card", "International Passport", "Driver's License", "Academic Certificate / Degree", "Business Registration", or "Unrecognized / Invalid Document").
+   - Identify issuing country or authority (e.g. "Republic of Uganda (NIRA)", "Kenya National ID", "Federal Republic of Nigeria", "United States", etc.).
+
+2. FORENSIC & SECURITY CHECKS:
+   - Check 1: "Clarity & Legibility" - Are the text, portrait, and national emblems clear, sharp, and readable without blinding glare, deep shadows, or cut-off corners?
+   - Check 2: "Document Structure & Seals" - Does it contain standard official governmental security markings (coat of arms, security guilloche patterns, official seals, chip indicator, microtext borders, or MRZ lines if passport)?
+   - Check 3: "Tamper & Alteration Detection" - Are there signs of digital photo alteration, font mismatching, pasted text boxes, or taking a photo of a computer screen?
+   - Check 4: "Name Alignment" - Does the printed holder name on the document reasonably match the registered user name "${userName || ''}" (considering standard naming orders, e.g., First Last vs Last First, middle initials)?
+
+3. EXTRACTED CREDENTIALS:
+   - holderName: The full legal name printed on the document (or empty if unreadable).
+   - documentNumber: Masked identification or NIN/Passport number (e.g., "CM84••••••2K" or "A09•••••"). Keep privacy protected by masking middle digits.
+   - issuingAuthority: Issuing country / government ministry or organization.
+   - expiryDate: Expiry date or issue date if visible (or "Not applicable" / "Permanent").
+
+4. FINAL VERDICT:
+   - verified: boolean. TRUE ONLY IF: It is an authentic government or certified document, text is legible, and holder name is consistent with "${userName || ''}".
+   - confidence: integer percentage (0 to 100).
+   - recommendation: One of:
+     * "auto_approved" (Confidence >= 80%, all checks passed, authentic government ID)
+     * "flagged_for_manual_review" (Confidence 50-79%, partially blurry, minor name variation, or unusual document type)
+     * "rejected_illegible" (Too blurry, poor lighting, or obscured details)
+     * "rejected_fraud_risk" (Signs of Photoshop, fake template, screenshot of another screen, or name totally mismatched)
+   - reason: A concise, professional explanation of the findings (e.g., "Authentic Uganda National ID verified. Name 'Aturinda Adriel' matches platform profile with clear security seal and NIRA coat of arms.").`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: "gemini-3.8-flash",
         contents: {
           parts: [
             {
@@ -222,18 +243,62 @@ async function startServer() {
             properties: {
               verified: { type: Type.BOOLEAN },
               confidence: { type: Type.NUMBER },
+              documentTypeDetected: { type: Type.STRING },
+              holderName: { type: Type.STRING },
+              documentNumber: { type: Type.STRING },
+              issuingAuthority: { type: Type.STRING },
+              expiryDate: { type: Type.STRING },
+              nameMatch: {
+                type: Type.OBJECT,
+                properties: {
+                  matches: { type: Type.BOOLEAN },
+                  explanation: { type: Type.STRING },
+                },
+                required: ["matches", "explanation"],
+              },
+              securityChecks: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING },
+                    label: { type: Type.STRING },
+                    passed: { type: Type.BOOLEAN },
+                    detail: { type: Type.STRING },
+                  },
+                  required: ["id", "label", "passed", "detail"],
+                },
+              },
+              recommendation: { type: Type.STRING },
               reason: { type: Type.STRING },
             },
-            required: ["verified", "confidence", "reason"],
+            required: [
+              "verified",
+              "confidence",
+              "documentTypeDetected",
+              "holderName",
+              "documentNumber",
+              "issuingAuthority",
+              "nameMatch",
+              "securityChecks",
+              "recommendation",
+              "reason",
+            ],
           },
         },
       });
 
-      const result = JSON.parse(response.text);
+      const result = JSON.parse(response.text || "{}");
       res.json(result);
     } catch (error: any) {
       console.error("Verification error:", error);
-      res.status(500).json({ error: error.message || "Failed to verify document" });
+      res.status(500).json({ 
+        error: error.message || "Failed to verify document",
+        verified: false,
+        confidence: 0,
+        recommendation: "flagged_for_manual_review",
+        reason: "The AI verification engine could not process the image at this moment. You can submit for manual admin review."
+      });
     }
   });
 

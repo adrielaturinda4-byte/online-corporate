@@ -137,6 +137,37 @@ export async function signInWithSupabase(
 }
 
 /**
+ * Sign in / Sign up with Google via Supabase OAuth
+ */
+export async function signInWithGoogle(): Promise<{ success: boolean; error?: string; url?: string }> {
+  try {
+    const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}` : '';
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: redirectUrl,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'select_account',
+        },
+      },
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    if (data?.url) {
+      window.location.href = data.url;
+    }
+
+    return { success: true, url: data?.url };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to initialize Google Sign In' };
+  }
+}
+
+/**
  * Sign out from Supabase Auth
  */
 export async function signOutFromSupabase(): Promise<{ success: boolean; error?: string }> {

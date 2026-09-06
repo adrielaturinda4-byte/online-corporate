@@ -17,14 +17,24 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: false },
 });
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || "",
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+let aiClient: GoogleGenAI | null = null;
+function getAi(): GoogleGenAI {
+  if (!aiClient) {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      throw new Error("GEMINI_API_KEY environment variable is required");
     }
+    aiClient = new GoogleGenAI({
+      apiKey: key,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
   }
-});
+  return aiClient;
+}
 
 async function startServer() {
   const app = express();
@@ -174,6 +184,7 @@ async function startServer() {
     }
 
     try {
+      const ai = getAi();
       // Clean the base64 string if it contains data URI prefix
       const base64Data = docBase64.split(",")[1] || docBase64;
       const mimeType = docBase64.split(";")[0]?.split(":")[1] || "image/jpeg";

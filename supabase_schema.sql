@@ -52,19 +52,21 @@ BEGIN
     speciality, 
     location, 
     description,
+    photo,
     is_verified,
     is_admin
   )
   VALUES (
     NEW.id,
     NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'name', ''),
+    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', ''),
     COALESCE(NEW.raw_user_meta_data->>'bizName', ''),
     COALESCE(NEW.raw_user_meta_data->>'role', 'Employee'),
     COALESCE(NEW.raw_user_meta_data->>'occupation', ''),
     COALESCE(NEW.raw_user_meta_data->>'speciality', ''),
     COALESCE(NEW.raw_user_meta_data->>'location', ''),
     COALESCE(NEW.raw_user_meta_data->>'description', ''),
+    COALESCE(NEW.raw_user_meta_data->>'avatar_url', NEW.raw_user_meta_data->>'picture', ''),
     true,
     (NEW.email = 'adrielaturinda4@gmail.com')
   )
@@ -77,6 +79,7 @@ BEGIN
     speciality = CASE WHEN EXCLUDED.speciality <> '' THEN EXCLUDED.speciality ELSE public.profiles.speciality END,
     location = CASE WHEN EXCLUDED.location <> '' THEN EXCLUDED.location ELSE public.profiles.location END,
     description = CASE WHEN EXCLUDED.description <> '' THEN EXCLUDED.description ELSE public.profiles.description END,
+    photo = CASE WHEN EXCLUDED.photo <> '' THEN EXCLUDED.photo ELSE public.profiles.photo END,
     updated_at = now();
   RETURN NEW;
 END;

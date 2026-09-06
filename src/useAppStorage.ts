@@ -77,34 +77,52 @@ export function useAppStorage() {
       setCurrentUser(loadedUsers[loggedEmail]);
     }
 
-    // Check active Supabase session
+    // Check active Supabase session & listen for Google OAuth logins
+    const syncSupabaseAuthUser = (user: any) => {
+      if (!user?.email) return;
+      const supEmail = user.email.trim().toLowerCase();
+      const meta = user.user_metadata || {};
+      
+      const existing = loadedUsers[supEmail];
+      const syncedUser: User = {
+        email: supEmail,
+        name: meta.full_name || meta.name || existing?.name || '',
+        bizName: meta.bizName || existing?.bizName || '',
+        role: (meta.role as any) || existing?.role || 'Employee',
+        occupation: meta.occupation || existing?.occupation || '',
+        speciality: meta.speciality || existing?.speciality || '',
+        location: meta.location || existing?.location || '',
+        description: meta.description || existing?.description || '',
+        photo: meta.avatar_url || meta.picture || existing?.photo || '',
+        isVerified: existing ? existing.isVerified : true,
+        isAdmin: supEmail === 'adrielaturinda4@gmail.com',
+        ...existing,
+      };
+
+      loadedUsers[supEmail] = syncedUser;
+      setUsers(prev => ({ ...prev, [supEmail]: syncedUser }));
+      localStorage.setItem(`oc_u_${supEmail}`, JSON.stringify(syncedUser));
+      setCurrentUser(syncedUser);
+      localStorage.setItem('oc_logged', supEmail);
+
+      // Persist to public profiles in Supabase
+      upsertProfileToSupabase(syncedUser).catch(() => {});
+    };
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user?.email) {
-        const supEmail = session.user.email.trim().toLowerCase();
-        if (loadedUsers[supEmail]) {
-          setCurrentUser(loadedUsers[supEmail]);
-          localStorage.setItem('oc_logged', supEmail);
-        } else {
-          // Construct user from Supabase user_metadata if not in localStorage yet
-          const meta = session.user.user_metadata || {};
-          const syncedUser: User = {
-            email: supEmail,
-            name: meta.name || '',
-            bizName: meta.bizName || '',
-            role: meta.role || 'Employee',
-            occupation: meta.occupation || '',
-            location: meta.location || '',
-            description: meta.description || '',
-            isVerified: true,
-          };
-          loadedUsers[supEmail] = syncedUser;
-          setUsers({ ...loadedUsers });
-          localStorage.setItem(`oc_u_${supEmail}`, JSON.stringify(syncedUser));
-          setCurrentUser(syncedUser);
-          localStorage.setItem('oc_logged', supEmail);
-        }
+        syncSupabaseAuthUser(session.user);
       }
     }).catch(() => {});
+
+    const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user?.email) {
+        syncSupabaseAuthUser(session.user);
+        if (typeof window !== 'undefined' && window.location.hash.includes('access_token')) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }
+    });
 
     // Fetch all registered user profiles from Supabase database
     fetchProfilesFromSupabase().then(remoteProfiles => {

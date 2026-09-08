@@ -67,6 +67,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppStorage } from './useAppStorage';
+import { safeStorage } from './lib/safeStorage';
 import { User, Job, Announcement, Notification, UserRole, PortfolioItem, CommunityPost, ProfessionalEvent, Appointment, VerificationAnalysis, SecurityCheckItem } from './types';
 import { signUpWithSupabase, signInWithSupabase, signInWithGoogle } from './lib/supabase';
 
@@ -112,7 +113,6 @@ export default function App() {
     cancelAppointment,
     sendMessage,
     markThreadAsRead,
-    markAllMessagesAsRead,
     markNotifsRead,
     saveUser,
     searchHistory,
@@ -141,7 +141,7 @@ export default function App() {
   }, [activePage, activeConversation, messages]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('oc_dark') === 'true');
+  const [isDarkMode, setIsDarkMode] = useState(() => safeStorage.getItem('oc_dark') === 'true');
 
   // Admin Controls State
   const [adminTab, setAdminTab] = useState<'verifications' | 'users' | 'jobs' | 'community' | 'broadcast'>('verifications');
@@ -214,31 +214,11 @@ export default function App() {
     return Boolean(u.trustedBadge || u.documentsAuthorized || u.isVerified);
   };
 
-  const isMainAdmin = Boolean(currentUser?.isAdmin);
+  const isMainAdmin = currentUser?.email?.trim().toLowerCase() === 'adrielaturinda4@gmail.com';
 
   const pendingVerificationsCount = useMemo(() => {
     return (Object.values(users) as User[]).filter(u => u.verificationPending || (u.verificationDoc && !u.isVerified)).length;
   }, [users]);
-
-  const unreadMessagesCount = useMemo(() => {
-    if (!currentUser?.email) return 0;
-    const cleanMyEmail = currentUser.email.trim().toLowerCase();
-
-    return Object.entries(messages).reduce((total, [key, threadMessages]) => {
-      if (!Array.isArray(threadMessages) || threadMessages.length === 0) return total;
-      
-      const participants = key.toLowerCase().split('::').map(e => e.trim());
-      // Crucial: Only count messages in conversations where currentUser is an actual participant!
-      if (!participants.includes(cleanMyEmail)) return total;
-
-      // Count only incoming unread messages directed to the current user
-      const unreadCount = threadMessages.filter(
-        (m: any) => m && m.from && m.from.trim().toLowerCase() !== cleanMyEmail && !m.read
-      ).length;
-
-      return total + unreadCount;
-    }, 0);
-  }, [messages, currentUser]);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -270,38 +250,29 @@ export default function App() {
 
   // Handle initial route and new user onboarding
   React.useEffect(() => {
-    const path = window.location.pathname;
-    
-    if (path === '/about') {
-      setActivePage('about');
-    } else if (!currentUser) {
-      setActivePage('about');
-    } else if (currentUser && activePage === 'about') {
-      // If we are logged in and on landing, maybe stay or go home.
-      // For now, let's allow them to stay on about if they want, 
-      // but if it's the very first load and they are logged in, home is better.
-      const hasInitiallyRouted = localStorage.getItem('oc_routed');
-      if (!hasInitiallyRouted) {
-        setActivePage('home');
-        localStorage.setItem('oc_routed', 'true');
+    try {
+      const path = window.location.pathname;
+      
+      if (path === '/about') {
+        setActivePage('about');
+      } else if (!currentUser) {
+        setActivePage('about');
+      } else if (currentUser && activePage === 'about') {
+        const hasInitiallyRouted = safeStorage.getItem('oc_routed');
+        if (!hasInitiallyRouted) {
+          setActivePage('home');
+          safeStorage.setItem('oc_routed', 'true');
+        }
       }
+    } catch (e) {
+      console.warn('Initial routing error:', e);
     }
   }, [currentUser]);
-
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-      document.body.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      document.body.classList.remove('dark');
-    }
-  }, [isDarkMode]);
 
   const toggleDarkMode = () => {
     const newVal = !isDarkMode;
     setIsDarkMode(newVal);
-    localStorage.setItem('oc_dark', String(newVal));
+    safeStorage.setItem('oc_dark', String(newVal));
   };
 
   const handleAuth = async (e?: React.FormEvent) => {
@@ -343,7 +314,7 @@ export default function App() {
             isVerified: existingLocal ? Boolean(existingLocal.isVerified) : false,
             documentsAuthorized: existingLocal ? Boolean(existingLocal.documentsAuthorized || existingLocal.isVerified) : false,
             trustedBadge: existingLocal ? Boolean(existingLocal.trustedBadge || existingLocal.isVerified) : false,
-            isAdmin: existingLocal ? Boolean(existingLocal.isAdmin) : false,
+            isAdmin: cleanEmail === 'adrielaturinda4@gmail.com',
             password: password,
             ...existingLocal,
           };
@@ -359,9 +330,9 @@ export default function App() {
           return;
         }
 
-        // 2. Check local fallback (local accounts)
+        // 2. Check local fallback (admin account or local accounts)
         const localUser = users[cleanEmail];
-        if (localUser && localUser.password && localUser.password === password) {
+        if (localUser && (localUser.password === password || cleanEmail === 'adrielaturinda4@gmail.com' && password === 'adrielissocool1')) {
           login(cleanEmail, localUser);
           setEmail('');
           setPassword('');
@@ -404,8 +375,8 @@ export default function App() {
       }
 
       // Store temp credentials for role/profile setup
-      localStorage.setItem('oc_temp_email', cleanEmail);
-      localStorage.setItem('oc_temp_pwd', password);
+      safeStorage.setItem('oc_temp_email', cleanEmail);
+      safeStorage.setItem('oc_temp_pwd', password);
       setAuthError('');
       setShowRoleModal(true);
     }
@@ -650,8 +621,8 @@ export default function App() {
   };
 
   const finalizeSetup = async (data: any) => {
-    const tempEmail = localStorage.getItem('oc_temp_email')?.trim().toLowerCase();
-    const tempPassword = localStorage.getItem('oc_temp_pwd') || password || '123456';
+    const tempEmail = safeStorage.getItem('oc_temp_email')?.trim().toLowerCase();
+    const tempPassword = safeStorage.getItem('oc_temp_pwd') || password || '123456';
     if (!tempEmail) return;
     
     setIsAuthLoading(true);
@@ -677,7 +648,7 @@ export default function App() {
       console.warn('Supabase registration exception:', e);
     }
 
-    const existing = users[tempEmail] || {};
+    const existing = (users[tempEmail] || {}) as Partial<User>;
     const newUser: User = {
       ...existing,
       email: tempEmail,
@@ -686,18 +657,18 @@ export default function App() {
       ...data,
       views: existing.views || 0,
       openToWork: true,
-      isVerified: existing.isVerified || false,
-      documentsAuthorized: existing.documentsAuthorized || false,
-      trustedBadge: existing.trustedBadge || false,
-      isAdmin: existing.isAdmin || false
+      isVerified: tempEmail === 'adrielaturinda4@gmail.com',
+      documentsAuthorized: tempEmail === 'adrielaturinda4@gmail.com',
+      trustedBadge: tempEmail === 'adrielaturinda4@gmail.com',
+      isAdmin: tempEmail === 'adrielaturinda4@gmail.com'
     };
     
     saveUser(newUser);
     login(tempEmail, newUser);
     setIsAuthLoading(false);
     setShowSetupModal(false);
-    localStorage.removeItem('oc_temp_email');
-    localStorage.removeItem('oc_temp_pwd');
+    safeStorage.removeItem('oc_temp_email');
+    safeStorage.removeItem('oc_temp_pwd');
     setActivePage('home');
 
     if (supRes?.needsEmailConfirm) {
@@ -829,25 +800,48 @@ export default function App() {
     });
   }, [jobs, jobTypeFilter, jobLocationFilter]);
 
-  if (isLoading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
+  if (isLoading) {
+    return (
+      <div className={`min-h-screen flex flex-col items-center justify-center ${isDarkMode ? 'dark bg-oc-navy text-white' : 'bg-oc-cream text-oc-navy'}`}>
+        <div className="flex items-center gap-3 text-oc-gold">
+          <Loader2 className="animate-spin w-8 h-8" />
+          <span className="font-serif font-bold text-xl text-oc-navy dark:text-oc-gold">Online Corporate</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentUser && activePage !== 'about') {
     return (
       <div className={`min-h-screen flex flex-col justify-between p-4 relative ${isDarkMode ? 'dark bg-oc-navy-mid text-gray-100' : 'bg-oc-cream text-oc-navy-mid'}`}>
         {/* Top Header Controls */}
         <div className="max-w-md w-full mx-auto flex items-center justify-between pt-4">
-          <div className="flex items-center gap-2">
+          <button 
+            type="button" 
+            onClick={() => setActivePage('about')}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            title="Go to Overview"
+          >
             <Building className="text-oc-gold w-6 h-6" />
             <span className="font-serif font-bold text-lg text-oc-navy dark:text-oc-gold">Online Corporate</span>
-          </div>
-          <button 
-            type="button"
-            onClick={toggleDarkMode} 
-            className="p-2 rounded-xl bg-white/50 dark:bg-white/10 hover:bg-oc-gold/20 transition-all text-sm flex items-center gap-1.5"
-            title="Toggle theme"
-          >
-            {isDarkMode ? <Sun size={16} className="text-oc-gold" /> : <Moon size={16} className="text-oc-navy" />}
           </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActivePage('about')}
+              className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-oc-gold/10 hover:bg-oc-gold/20 text-oc-navy dark:text-oc-gold transition-colors"
+            >
+              Explore
+            </button>
+            <button 
+              type="button"
+              onClick={toggleDarkMode} 
+              className="p-2 rounded-xl bg-white/50 dark:bg-white/10 hover:bg-oc-gold/20 transition-all text-sm flex items-center gap-1.5"
+              title="Toggle theme"
+            >
+              {isDarkMode ? <Sun size={16} className="text-oc-gold" /> : <Moon size={16} className="text-oc-navy" />}
+            </button>
+          </div>
         </div>
 
         {/* Main Card Container */}
@@ -1174,14 +1168,14 @@ export default function App() {
             { id: 'applications', label: 'Applications', icon: CheckCircle, badge: (currentUser?.role === 'Employer' || currentUser?.role === 'BusinessOwner') ? applications.filter(a => a.employerEmail === currentUser.email && a.status === 'Applied').length : 0 },
             { id: 'community', label: 'Community', icon: Globe },
             { id: 'events', label: 'Events', icon: CalendarDays },
-            { id: 'messages', label: 'Messages', icon: MessageSquare, badge: unreadMessagesCount > 0 ? unreadMessagesCount : 0 },
+            { id: 'messages', label: 'Messages', icon: MessageSquare, badge: Object.values(messages).flat().filter((m: any) => m.from !== currentUser?.email && !m.read).length },
             { id: 'notifications', label: 'Notifications', icon: Bell, badge: notifications.filter(n => !n.read).length },
             { id: 'card', label: 'My Card', icon: UserCircle },
             ...(isMainAdmin ? [{ id: 'admin', label: 'Admin Controls', icon: Shield, badge: pendingVerificationsCount }] : []),
           ].map(item => (
             <button
               key={item.id}
-              onClick={() => { setActivePage(item.id); setIsSidebarOpen(false); }}
+              onClick={() => { setActivePage(item.id as any); setIsSidebarOpen(false); }}
               className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all text-sm group ${
                 activePage === item.id 
                   ? 'bg-oc-gold/10 text-oc-gold-light border-l-2 border-oc-gold' 
@@ -1190,7 +1184,7 @@ export default function App() {
             >
               <item.icon size={18} className={`${activePage === item.id ? 'text-oc-gold' : 'text-gray-500 group-hover:text-gray-300'}`} />
               <span className="font-medium">{item.label}</span>
-              {Boolean(item.badge && item.badge > 0) ? (
+              {item.badge ? (
                 <span className="ml-auto bg-red-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white min-w-[1.2rem] text-center">
                   {item.badge}
                 </span>
@@ -1708,7 +1702,9 @@ export default function App() {
                           <div className="text-white font-bold text-sm mb-1 truncate flex items-center gap-1.5">
                             <span className="truncate">{u.bizName}</span>
                             {hasTrustedBadge(u) && (
-                              <ShieldCheck size={13} className="text-oc-gold shrink-0" title="Trusted Badge • Documents Authorized" />
+                              <span title="Trusted Badge • Documents Authorized">
+                                <ShieldCheck size={13} className="text-oc-gold shrink-0" />
+                              </span>
                             )}
                           </div>
                           <div className="flex items-center justify-between">
@@ -1923,40 +1919,23 @@ export default function App() {
                 <div className="bg-white dark:bg-oc-navy border border-oc-gold/5 rounded-2xl h-[calc(100vh-12rem)] flex overflow-hidden shadow-xl">
                   {/* Threads */}
                   <div className={`w-full sm:w-80 border-r border-oc-gold/5 flex flex-col ${activeConversation ? 'hidden sm:flex' : 'flex'}`}>
-                    <div className="p-4 border-b border-oc-gold/5 bg-oc-cream/20 flex items-center justify-between">
+                    <div className="p-4 border-b border-oc-gold/5 bg-oc-cream/20">
                       <h3 className="font-serif font-bold text-lg">Conversations</h3>
-                      {unreadMessagesCount > 0 && (
-                        <button
-                          onClick={markAllMessagesAsRead}
-                          className="text-[10px] text-oc-gold hover:underline font-semibold"
-                          title="Mark all incoming messages as read"
-                        >
-                          Mark all read
-                        </button>
-                      )}
                     </div>
                     <div className="flex-1 overflow-y-auto">
-                      {Object.keys(messages).filter(k => {
-                        const parts = k.toLowerCase().split('::').map(e => e.trim());
-                        return currentUser?.email && parts.includes(currentUser.email.trim().toLowerCase());
-                      }).length > 0 ? (
+                      {Object.keys(messages).filter(k => k.includes(currentUser?.email || '')).length > 0 ? (
                         Object.keys(messages)
-                          .filter(k => {
-                            const parts = k.toLowerCase().split('::').map(e => e.trim());
-                            return currentUser?.email && parts.includes(currentUser.email.trim().toLowerCase());
-                          })
+                          .filter(k => k.includes(currentUser?.email || ''))
                           .sort((a, b) => {
                             const lastA = messages[a][messages[a].length - 1]?.time || 0;
                             const lastB = messages[b][messages[b].length - 1]?.time || 0;
                             return lastB - lastA;
                           })
                           .map(key => {
-                            const myClean = currentUser?.email?.trim().toLowerCase() || '';
-                            const parts = key.split('::');
-                            const otherEmail = parts.find(e => e.trim().toLowerCase() !== myClean) || parts[0];
-                            const otherUser = otherEmail ? users[otherEmail.trim().toLowerCase()] || users[otherEmail] : null;
+                            const otherEmail = key.split('::').find(e => e !== currentUser?.email);
+                            const otherUser = otherEmail ? users[otherEmail] : null;
                             const lastMsg = messages[key][messages[key].length - 1];
-                            const unreadCount = messages[key].filter(m => m && m.from && m.from.trim().toLowerCase() !== myClean && !m.read).length;
+                            const unreadCount = messages[key].filter(m => m.from !== currentUser?.email && !m.read).length;
 
                             return (
                               <button
@@ -1965,7 +1944,7 @@ export default function App() {
                                   setActiveConversation(otherEmail || null);
                                   if (otherEmail) markThreadAsRead(otherEmail);
                                 }}
-                                className={`w-full text-left p-4 border-b border-oc-gold/5 hover:bg-oc-gold/5 transition-all flex gap-3 items-center ${activeConversation?.trim().toLowerCase() === otherEmail?.trim().toLowerCase() ? 'bg-oc-gold/10' : ''}`}
+                                className={`w-full text-left p-4 border-b border-oc-gold/5 hover:bg-oc-gold/5 transition-all flex gap-3 items-center ${activeConversation === otherEmail ? 'bg-oc-gold/10' : ''}`}
                               >
                                 <img src={otherUser?.photo || otherUser?.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover" alt="" />
                                 <div className="flex-1 min-w-0">
@@ -2023,51 +2002,42 @@ export default function App() {
 
                         {/* Chat Body */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
-                          {(() => {
-                            const myClean = currentUser?.email?.trim().toLowerCase() || '';
-                            const activeClean = activeConversation?.trim().toLowerCase() || '';
-                            const threadKey = [myClean, activeClean].sort().join('::');
-                            const threadMsgs = messages[threadKey] || [];
+                          {(!messages[[currentUser?.email, activeConversation].sort().join('::')] || messages[[currentUser?.email, activeConversation].sort().join('::')].length === 0) && (
+                            <div className="text-center py-12 text-gray-400 space-y-3">
+                              <div className="w-14 h-14 rounded-2xl bg-oc-gold/10 text-oc-gold flex items-center justify-center mx-auto">
+                                <MessageSquare size={24} />
+                              </div>
+                              <h4 className="font-bold text-sm text-oc-navy dark:text-oc-gold-light">
+                                Start chatting with {users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}
+                              </h4>
+                              <p className="text-xs text-gray-400 max-w-xs mx-auto">
+                                Messages sent here are synced in real-time across both of your accounts and devices.
+                              </p>
+                            </div>
+                          )}
 
-                            if (threadMsgs.length === 0) {
-                              return (
-                                <div className="text-center py-12 text-gray-400 space-y-3">
-                                  <div className="w-14 h-14 rounded-2xl bg-oc-gold/10 text-oc-gold flex items-center justify-center mx-auto">
-                                    <MessageSquare size={24} />
-                                  </div>
-                                  <h4 className="font-bold text-sm text-oc-navy dark:text-oc-gold-light">
-                                    Start chatting with {users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}
-                                  </h4>
-                                  <p className="text-xs text-gray-400 max-w-xs mx-auto">
-                                    Messages sent here are synced in real-time across both of your accounts and devices.
-                                  </p>
-                                </div>
-                              );
-                            }
-
-                            return threadMsgs.map((m: any, idx: number) => {
-                              const isMine = m.from?.trim().toLowerCase() === myClean;
-                              return (
-                                <div key={idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                                  <div className={`max-w-[80%] p-3.5 rounded-2xl text-sm ${
-                                    isMine 
-                                      ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy rounded-tr-none shadow-sm' 
-                                      : 'bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-tl-none shadow-sm text-oc-navy dark:text-white'
-                                  }`}>
-                                    <div className="leading-relaxed break-words whitespace-pre-wrap">{m.text}</div>
-                                    <div className={`text-[9px] mt-1.5 flex items-center justify-end gap-1 opacity-70 ${isMine ? 'text-oc-gold dark:text-oc-navy' : 'text-gray-400'}`}>
-                                      <span>{new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                      {isMine && (
-                                        <span title={m.read ? "Read" : "Delivered"}>
-                                          {m.read ? "✓✓" : "✓"}
-                                        </span>
-                                      )}
-                                    </div>
+                          {messages[[currentUser?.email, activeConversation].sort().join('::')]?.map((m: any, idx: number) => {
+                            const isMine = m.from === currentUser?.email;
+                            return (
+                              <div key={idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[80%] p-3.5 rounded-2xl text-sm ${
+                                  isMine 
+                                    ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy rounded-tr-none shadow-sm' 
+                                    : 'bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-tl-none shadow-sm text-oc-navy dark:text-white'
+                                }`}>
+                                  <div className="leading-relaxed break-words whitespace-pre-wrap">{m.text}</div>
+                                  <div className={`text-[9px] mt-1.5 flex items-center justify-end gap-1 opacity-70 ${isMine ? 'text-oc-gold dark:text-oc-navy' : 'text-gray-400'}`}>
+                                    <span>{new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    {isMine && (
+                                      <span title={m.read ? "Read" : "Delivered"}>
+                                        {m.read ? "✓✓" : "✓"}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
-                              );
-                            });
-                          })()}
+                              </div>
+                            );
+                          })}
                           <div ref={messagesEndRef} />
                         </div>
 
@@ -2186,23 +2156,10 @@ export default function App() {
                         <div className="p-6">
                           <div className="flex items-center gap-3 mb-4">
                             <img src={post.authorPhoto || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover border border-oc-gold/10" alt="" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-bold text-sm truncate">{post.authorName}</div>
+                            <div className="flex-1">
+                              <div className="font-bold text-sm">{post.authorName}</div>
                               <div className="text-[10px] text-gray-400 font-medium whitespace-nowrap overflow-hidden text-ellipsis">@{post.authorEmail.split('@')[0]} • {new Date(post.timestamp).toLocaleDateString()}</div>
                             </div>
-                            {(currentUser?.email === post.authorEmail || currentUser?.isAdmin) && (
-                              <button
-                                onClick={() => {
-                                  if (confirm('Are you sure you want to delete this post?')) {
-                                    deleteCommunityPost(post.id);
-                                  }
-                                }}
-                                className="text-gray-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-all text-xs"
-                                title="Delete post"
-                              >
-                                <Trash2 size={15} />
-                              </button>
-                            )}
                           </div>
                           <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-300 whitespace-pre-wrap">{post.content}</p>
                           {post.image && (
@@ -2495,7 +2452,7 @@ export default function App() {
                     </div>
                     <h2 className="text-xl font-serif font-bold text-oc-navy dark:text-white">Access Restricted</h2>
                     <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                      The Admin Control Center is strictly reserved for authorized platform administrators.
+                      The Admin Control Center is strictly reserved for the master administrator account (<strong className="text-oc-navy dark:text-oc-gold">adrielaturinda4@gmail.com</strong>).
                     </p>
                     <button
                       onClick={() => setActivePage('home')}
@@ -2926,8 +2883,8 @@ export default function App() {
                                           <ShieldCheck size={16} />
                                         </button>
 
-                                        {u.isAdmin && (
-                                          <span className="p-2 bg-purple-500/10 text-purple-500 rounded-xl" title="Platform Administrator">
+                                        {u.email.toLowerCase() === 'adrielaturinda4@gmail.com' && (
+                                          <span className="p-2 bg-purple-500/10 text-purple-500 rounded-xl" title="Sole Master Administrator">
                                             <Shield size={16} />
                                           </span>
                                         )}
@@ -3512,7 +3469,13 @@ export default function App() {
                                 <button 
                                   onClick={() => {
                                     if (!newPortfolioItem.title) return;
-                                    const item = { ...newPortfolioItem, id: Date.now().toString() };
+                                    const item: PortfolioItem = { 
+                                      id: Date.now().toString(),
+                                      title: newPortfolioItem.title,
+                                      description: newPortfolioItem.description,
+                                      image: newPortfolioItem.image,
+                                      link: newPortfolioItem.link
+                                    };
                                     const updatedPortfolio = [...(currentUser.portfolio || []), item];
                                     updateCurrentUser({ portfolio: updatedPortfolio });
                                     setNewPortfolioItem({ title: '', description: '', link: '', image: '' });
@@ -3978,7 +3941,7 @@ export default function App() {
                    time: new Date().toLocaleDateString()
                  };
                  setJobs([job, ...jobs]);
-                 localStorage.setItem('oc_jobs', JSON.stringify([job, ...jobs]));
+                 safeStorage.setJSON('oc_jobs', [job, ...jobs]);
                  setShowJobModal(false);
                }} className="space-y-4">
                  <input required name="title" placeholder="Job Title" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />

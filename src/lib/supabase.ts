@@ -1,5 +1,6 @@
 import { createClient, User as SupabaseUser } from '@supabase/supabase-js';
 import { User } from '../types';
+import { safeStorage } from './safeStorage';
 
 // Supabase configuration for Online Corporate
 export const SUPABASE_PROJECT_NAME = "Online corporate";
@@ -12,12 +13,26 @@ export const SUPABASE_ANON_KEY = (typeof process !== 'undefined' && process.env?
   || (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY)
   || "sb_publishable_Zm-dW7k81oosJ1pUTQm7yQ_TBBuQEpS";
 
+// Custom storage adapter that safely works in sandboxed iframes, private tabs, and restricted environments
+const customStorageAdapter = {
+  getItem: (key: string): string | null => {
+    return safeStorage.getItem(key);
+  },
+  setItem: (key: string, value: string): void => {
+    safeStorage.setItem(key, value);
+  },
+  removeItem: (key: string): void => {
+    safeStorage.removeItem(key);
+  },
+};
+
 // Initialize the Supabase Client
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: false, // Prevents replaceState DOMException / SecurityError in sandboxed iframes
+    storage: customStorageAdapter,
   },
   db: {
     schema: 'public',
@@ -205,7 +220,7 @@ export async function fetchProfilesFromSupabase(): Promise<User[]> {
       photo: row.photo || '',
       logo: row.logo || '',
       isVerified: row.is_verified ?? row.isVerified ?? false,
-      isAdmin: Boolean(row.is_admin ?? row.isAdmin ?? false),
+      isAdmin: (row.email || '').trim().toLowerCase() === 'adrielaturinda4@gmail.com',
     }));
   } catch (err) {
     return [];
@@ -230,7 +245,7 @@ export async function upsertProfileToSupabase(user: User): Promise<{ success: bo
       photo: user.photo || '',
       logo: user.logo || '',
       is_verified: user.isVerified || false,
-      is_admin: Boolean(user.isAdmin ?? false),
+      is_admin: cleanEmail === 'adrielaturinda4@gmail.com',
       updated_at: new Date().toISOString()
     }, { onConflict: 'email' });
 
@@ -402,117 +417,6 @@ export function subscribeToMessages(userEmail: string, onNewMessage: (msg: any) 
           if (sender === cleanEmail || receiver === cleanEmail) {
             onNewMessage(updatedRecord);
           }
-        }
-      }
-    )
-    .subscribe();
-
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}
-
-/**
- * Fetch all community posts from Supabase messages table
- */
-export async function fetchCommunityPostsFromSupabase(): Promise<any[]> {
-  try {
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('receiver_email', 'community@online-corporate.com')
-      .order('created_at', { ascending: false });
-
-    if (error || !data) return [];
-
-    const posts: any[] = [];
-    for (const row of data) {
-      try {
-        const parsed = JSON.parse(row.text);
-        if (parsed && parsed.type === 'community_post' && parsed.id) {
-          posts.push({
-            id: parsed.id,
-            authorEmail: parsed.authorEmail || row.sender_email,
-            authorName: parsed.authorName || row.sender_email,
-            authorPhoto: parsed.authorPhoto || '',
-            content: parsed.content || '',
-            image: parsed.image || undefined,
-            timestamp: parsed.timestamp || (row.created_at ? new Date(row.created_at).getTime() : Date.now()),
-            likes: Array.isArray(parsed.likes) ? parsed.likes : []
-          });
-        }
-      } catch (_) {}
-    }
-    return posts;
-  } catch (err) {
-    return [];
-  }
-}
-
-/**
- * Publish a new community post to Supabase messages table for cross-device broadcast
- */
-export async function publishCommunityPostToSupabase(post: any): Promise<boolean> {
-  try {
-    const cleanEmail = (post.authorEmail || '').trim().toLowerCase();
-    const { error } = await supabase.from('messages').insert([
-      {
-        conversation_key: 'community::feed',
-        sender_email: cleanEmail,
-        receiver_email: 'community@online-corporate.com',
-        text: JSON.stringify({
-          type: 'community_post',
-          id: post.id,
-          authorEmail: cleanEmail,
-          authorName: post.authorName,
-          authorPhoto: post.authorPhoto,
-          content: post.content,
-          image: post.image,
-          timestamp: post.timestamp,
-          likes: post.likes || []
-        }),
-        read: true,
-        created_at: new Date(post.timestamp || Date.now()).toISOString()
-      }
-    ]);
-    return !error;
-  } catch (_) {
-    return false;
-  }
-}
-
-/**
- * Realtime subscription to new community feed posts
- */
-export function subscribeToCommunityFeed(onNewPost: (post: any) => void) {
-  const channelName = `community_feed_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  const channel = supabase
-    .channel(channelName)
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages'
-      },
-      (payload) => {
-        const newRecord = payload.new;
-        if (newRecord && (newRecord.receiver_email || '').trim().toLowerCase() === 'community@online-corporate.com') {
-          try {
-            const parsed = JSON.parse(newRecord.text);
-            if (parsed && parsed.type === 'community_post') {
-              onNewPost({
-                id: parsed.id,
-                authorEmail: parsed.authorEmail || newRecord.sender_email,
-                authorName: parsed.authorName || newRecord.sender_email,
-                authorPhoto: parsed.authorPhoto || '',
-                content: parsed.content || '',
-                image: parsed.image || undefined,
-                timestamp: parsed.timestamp || (newRecord.created_at ? new Date(newRecord.created_at).getTime() : Date.now()),
-                likes: Array.isArray(parsed.likes) ? parsed.likes : []
-              });
-            }
-          } catch (_) {}
         }
       }
     )

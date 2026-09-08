@@ -214,7 +214,7 @@ export default function App() {
     return Boolean(u.trustedBadge || u.documentsAuthorized || u.isVerified);
   };
 
-  const isMainAdmin = Boolean(currentUser?.isAdmin);
+  const isMainAdmin = currentUser?.email?.trim().toLowerCase() === 'adrielaturinda4@gmail.com';
 
   const pendingVerificationsCount = useMemo(() => {
     return (Object.values(users) as User[]).filter(u => u.verificationPending || (u.verificationDoc && !u.isVerified)).length;
@@ -288,16 +288,6 @@ export default function App() {
     }
   }, [currentUser]);
 
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-      document.body.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      document.body.classList.remove('dark');
-    }
-  }, [isDarkMode]);
-
   const toggleDarkMode = () => {
     const newVal = !isDarkMode;
     setIsDarkMode(newVal);
@@ -343,7 +333,7 @@ export default function App() {
             isVerified: existingLocal ? Boolean(existingLocal.isVerified) : false,
             documentsAuthorized: existingLocal ? Boolean(existingLocal.documentsAuthorized || existingLocal.isVerified) : false,
             trustedBadge: existingLocal ? Boolean(existingLocal.trustedBadge || existingLocal.isVerified) : false,
-            isAdmin: existingLocal ? Boolean(existingLocal.isAdmin) : false,
+            isAdmin: cleanEmail === 'adrielaturinda4@gmail.com',
             password: password,
             ...existingLocal,
           };
@@ -359,9 +349,9 @@ export default function App() {
           return;
         }
 
-        // 2. Check local fallback (local accounts)
+        // 2. Check local fallback (admin account or local accounts)
         const localUser = users[cleanEmail];
-        if (localUser && localUser.password && localUser.password === password) {
+        if (localUser && (localUser.password === password || cleanEmail === 'adrielaturinda4@gmail.com' && password === 'adrielissocool1')) {
           login(cleanEmail, localUser);
           setEmail('');
           setPassword('');
@@ -686,10 +676,10 @@ export default function App() {
       ...data,
       views: existing.views || 0,
       openToWork: true,
-      isVerified: existing.isVerified || false,
-      documentsAuthorized: existing.documentsAuthorized || false,
-      trustedBadge: existing.trustedBadge || false,
-      isAdmin: existing.isAdmin || false
+      isVerified: tempEmail === 'adrielaturinda4@gmail.com',
+      documentsAuthorized: tempEmail === 'adrielaturinda4@gmail.com',
+      trustedBadge: tempEmail === 'adrielaturinda4@gmail.com',
+      isAdmin: tempEmail === 'adrielaturinda4@gmail.com'
     };
     
     saveUser(newUser);
@@ -2186,23 +2176,10 @@ export default function App() {
                         <div className="p-6">
                           <div className="flex items-center gap-3 mb-4">
                             <img src={post.authorPhoto || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover border border-oc-gold/10" alt="" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-bold text-sm truncate">{post.authorName}</div>
+                            <div className="flex-1">
+                              <div className="font-bold text-sm">{post.authorName}</div>
                               <div className="text-[10px] text-gray-400 font-medium whitespace-nowrap overflow-hidden text-ellipsis">@{post.authorEmail.split('@')[0]} • {new Date(post.timestamp).toLocaleDateString()}</div>
                             </div>
-                            {(currentUser?.email === post.authorEmail || currentUser?.isAdmin) && (
-                              <button
-                                onClick={() => {
-                                  if (confirm('Are you sure you want to delete this post?')) {
-                                    deleteCommunityPost(post.id);
-                                  }
-                                }}
-                                className="text-gray-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-all text-xs"
-                                title="Delete post"
-                              >
-                                <Trash2 size={15} />
-                              </button>
-                            )}
                           </div>
                           <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-300 whitespace-pre-wrap">{post.content}</p>
                           {post.image && (
@@ -2495,7 +2472,7 @@ export default function App() {
                     </div>
                     <h2 className="text-xl font-serif font-bold text-oc-navy dark:text-white">Access Restricted</h2>
                     <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                      The Admin Control Center is strictly reserved for authorized platform administrators.
+                      The Admin Control Center is strictly reserved for the master administrator account (<strong className="text-oc-navy dark:text-oc-gold">adrielaturinda4@gmail.com</strong>).
                     </p>
                     <button
                       onClick={() => setActivePage('home')}
@@ -2926,8 +2903,8 @@ export default function App() {
                                           <ShieldCheck size={16} />
                                         </button>
 
-                                        {u.isAdmin && (
-                                          <span className="p-2 bg-purple-500/10 text-purple-500 rounded-xl" title="Platform Administrator">
+                                        {u.email.toLowerCase() === 'adrielaturinda4@gmail.com' && (
+                                          <span className="p-2 bg-purple-500/10 text-purple-500 rounded-xl" title="Sole Master Administrator">
                                             <Shield size={16} />
                                           </span>
                                         )}

@@ -9,10 +9,7 @@ import {
   fetchMessagesFromSupabase,
   sendMessageToSupabase,
   markMessagesAsReadInSupabase,
-  subscribeToMessages,
-  fetchCommunityPostsFromSupabase,
-  publishCommunityPostToSupabase,
-  subscribeToCommunityFeed
+  subscribeToMessages
 } from './lib/supabase';
 
 export function useAppStorage() {
@@ -61,11 +58,34 @@ export function useAppStorage() {
           const u = JSON.parse(localStorage.getItem(key) || '');
           if (u && u.email && !fakeSeedEmails.includes(u.email.trim().toLowerCase())) {
             const e = u.email.trim().toLowerCase();
+            if (e !== 'adrielaturinda4@gmail.com') {
+              u.isAdmin = false;
+            }
             loadedUsers[e] = u;
           }
         } catch (e) {}
       }
     }
+
+    // Ensure Admin Account adrielaturinda4@gmail.com is present with requested credentials and permissions
+    const adminEmail = 'adrielaturinda4@gmail.com';
+    const existingAdmin = loadedUsers[adminEmail];
+    const adminUser: User = {
+      ...(existingAdmin || {}),
+      email: adminEmail,
+      password: 'adrielissocool1',
+      isAdmin: true,
+      isVerified: true,
+      documentsAuthorized: true,
+      trustedBadge: true,
+      name: existingAdmin?.name || 'Adriel Aturinda',
+      bizName: existingAdmin?.bizName || 'Online Corporate Administration',
+      role: existingAdmin?.role || 'BusinessOwner',
+      country: existingAdmin?.country || 'Uganda',
+      description: existingAdmin?.description || 'Platform Administrator & Founder'
+    };
+    loadedUsers[adminEmail] = adminUser;
+    localStorage.setItem(`oc_u_${adminEmail}`, JSON.stringify(adminUser));
 
     setUsers(loadedUsers);
 
@@ -76,22 +96,12 @@ export function useAppStorage() {
     }
 
     // Check active Supabase session & listen for Google OAuth logins
-    const syncSupabaseAuthUser = async (user: any) => {
+    const syncSupabaseAuthUser = (user: any) => {
       if (!user?.email) return;
       const supEmail = user.email.trim().toLowerCase();
       const meta = user.user_metadata || {};
       
       const existing = loadedUsers[supEmail];
-
-      // Fetch profile row from Supabase to check the true database is_admin status
-      let dbIsAdmin = existing ? Boolean(existing.isAdmin) : false;
-      try {
-        const { data: prof } = await supabase.from('profiles').select('is_admin').eq('email', supEmail).maybeSingle();
-        if (prof && prof.is_admin !== undefined && prof.is_admin !== null) {
-          dbIsAdmin = Boolean(prof.is_admin);
-        }
-      } catch (_) {}
-
       const syncedUser: User = {
         email: supEmail,
         name: meta.full_name || meta.name || existing?.name || '',
@@ -105,8 +115,8 @@ export function useAppStorage() {
         isVerified: existing ? Boolean(existing.isVerified) : false,
         documentsAuthorized: existing ? Boolean(existing.documentsAuthorized || existing.isVerified) : false,
         trustedBadge: existing ? Boolean(existing.trustedBadge || existing.isVerified) : false,
+        isAdmin: supEmail === 'adrielaturinda4@gmail.com',
         ...existing,
-        isAdmin: dbIsAdmin || Boolean(existing?.isAdmin),
       };
 
       loadedUsers[supEmail] = syncedUser;
@@ -141,20 +151,11 @@ export function useAppStorage() {
           const merged = { ...prev };
           remoteProfiles.forEach(p => {
             const e = p.email.trim().toLowerCase();
-            merged[e] = { ...(merged[e] || {}), ...p, isAdmin: Boolean(p.isAdmin) };
+            merged[e] = { ...(merged[e] || {}), ...p };
             localStorage.setItem(`oc_u_${e}`, JSON.stringify(merged[e]));
           });
           return merged;
         });
-
-        // Sync currentUser if remote profile has updated admin or badge status
-        const activeLogged = localStorage.getItem('oc_logged')?.trim().toLowerCase();
-        if (activeLogged) {
-          const selfProfile = remoteProfiles.find(p => p.email.trim().toLowerCase() === activeLogged);
-          if (selfProfile) {
-            setCurrentUser(prev => prev ? ({ ...prev, ...selfProfile, isAdmin: Boolean(selfProfile.isAdmin) }) : prev);
-          }
-        }
       }
     }).catch(() => {});
 
@@ -259,149 +260,6 @@ export function useAppStorage() {
     };
   }, [currentUser?.email]);
 
-  // Synchronize Community Posts, Events, and Jobs across all devices and users
-  useEffect(() => {
-    let isMounted = true;
-
-    // 1. Sync community posts from server API and Supabase
-    const syncCommunityFeed = async () => {
-      try {
-        let serverPosts: CommunityPost[] = [];
-
-        // Fetch from server API
-        try {
-          const res = await fetch('/api/community-posts');
-          if (res.ok) {
-            const json = await res.json();
-            if (json?.data && Array.isArray(json.data)) {
-              serverPosts = json.data;
-            }
-          }
-        } catch (_) {}
-
-        // Fetch from Supabase messages as backup/supplement
-        try {
-          const supPosts = await fetchCommunityPostsFromSupabase();
-          if (supPosts && supPosts.length > 0) {
-            for (const sp of supPosts) {
-              if (!serverPosts.some(p => p.id === sp.id)) {
-                serverPosts.push(sp);
-              }
-            }
-          }
-        } catch (_) {}
-
-        // Upload any existing local posts that are not yet on the server
-        let localPosts: CommunityPost[] = [];
-        try {
-          localPosts = JSON.parse(localStorage.getItem('oc_posts') || '[]');
-        } catch (_) {}
-
-        for (const lp of localPosts) {
-          if (!serverPosts.some(p => p.id === lp.id)) {
-            serverPosts.unshift(lp);
-            fetch('/api/community-posts', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(lp)
-            }).catch(() => {});
-            publishCommunityPostToSupabase(lp).catch(() => {});
-          }
-        }
-
-        serverPosts.sort((a, b) => b.timestamp - a.timestamp);
-
-        if (isMounted && serverPosts.length > 0) {
-          setCommunityPosts(serverPosts);
-          localStorage.setItem('oc_posts', JSON.stringify(serverPosts));
-        }
-      } catch (_) {}
-    };
-
-    // 2. Sync Jobs and Events across users
-    const syncJobsAndEvents = async () => {
-      try {
-        const [jobsRes, eventsRes] = await Promise.allSettled([
-          fetch('/api/jobs').then(r => r.json()),
-          fetch('/api/events').then(r => r.json())
-        ]);
-
-        if (jobsRes.status === 'fulfilled' && jobsRes.value?.data && Array.isArray(jobsRes.value.data)) {
-          const sJobs = jobsRes.value.data;
-          let lJobs: Job[] = [];
-          try {
-            lJobs = JSON.parse(localStorage.getItem('oc_jobs') || '[]');
-          } catch (_) {}
-
-          const mergedJobs = [...sJobs];
-          for (const lj of lJobs) {
-            if (!mergedJobs.some(j => j.id === lj.id)) {
-              mergedJobs.unshift(lj);
-              fetch('/api/jobs', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(lj)
-              }).catch(() => {});
-            }
-          }
-          if (isMounted) {
-            setJobs(mergedJobs);
-            localStorage.setItem('oc_jobs', JSON.stringify(mergedJobs));
-          }
-        }
-
-        if (eventsRes.status === 'fulfilled' && eventsRes.value?.data && Array.isArray(eventsRes.value.data)) {
-          const sEvents = eventsRes.value.data;
-          let lEvents: ProfessionalEvent[] = [];
-          try {
-            lEvents = JSON.parse(localStorage.getItem('oc_events') || '[]');
-          } catch (_) {}
-
-          const mergedEvents = [...sEvents];
-          for (const le of lEvents) {
-            if (!mergedEvents.some(e => e.id === le.id)) {
-              mergedEvents.unshift(le);
-              fetch('/api/events', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(le)
-              }).catch(() => {});
-            }
-          }
-          if (isMounted) {
-            setEvents(mergedEvents);
-            localStorage.setItem('oc_events', JSON.stringify(mergedEvents));
-          }
-        }
-      } catch (_) {}
-    };
-
-    syncCommunityFeed();
-    syncJobsAndEvents();
-
-    // Listen to Supabase Realtime for instant community feed delivery across users
-    const unsubscribeFeed = subscribeToCommunityFeed((newFeedPost) => {
-      if (!isMounted) return;
-      setCommunityPosts(prev => {
-        if (prev.some(p => p.id === newFeedPost.id)) return prev;
-        const updated = [newFeedPost, ...prev];
-        localStorage.setItem('oc_posts', JSON.stringify(updated));
-        return updated;
-      });
-    });
-
-    // Periodic background sync every 8 seconds
-    const interval = setInterval(() => {
-      syncCommunityFeed();
-    }, 8000);
-
-    return () => {
-      isMounted = false;
-      unsubscribeFeed();
-      clearInterval(interval);
-    };
-  }, []);
-
   const saveUser = (user: User) => {
     const cleanEmail = user.email.trim().toLowerCase();
     const updatedUser = { ...user, email: cleanEmail };
@@ -477,103 +335,69 @@ export function useAppStorage() {
 
   const addCommunityPost = (content: string, image?: string) => {
     if (!currentUser) return;
-    const cleanEmail = currentUser.email.trim().toLowerCase();
     const newPost: CommunityPost = {
-      id: `post_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      authorEmail: cleanEmail,
-      authorName: currentUser.bizName || currentUser.name || cleanEmail,
-      authorPhoto: currentUser.photo || currentUser.logo || '',
-      content: content.trim(),
+      id: Date.now().toString(),
+      authorEmail: currentUser.email,
+      authorName: currentUser.bizName || currentUser.name || currentUser.email,
+      authorPhoto: currentUser.photo || currentUser.logo,
+      content,
       image,
       timestamp: Date.now(),
       likes: []
     };
-    
-    // 1. Optimistic update in state and localStorage
     const newList = [newPost, ...communityPosts];
     setCommunityPosts(newList);
     localStorage.setItem('oc_posts', JSON.stringify(newList));
-
-    // 2. Persist to shared server API so any user on any device can read it
-    fetch('/api/community-posts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newPost)
-    }).catch(err => console.warn('[Community API Post notice]:', err));
-
-    // 3. Broadcast to Supabase Realtime so active users see it live instantly
-    publishCommunityPostToSupabase(newPost).catch(() => {});
   };
 
   const likePost = (postId: string) => {
     if (!currentUser) return;
-    const cleanEmail = currentUser.email.trim().toLowerCase();
     const newList = communityPosts.map(p => {
       if (p.id === postId) {
-        const liked = p.likes.includes(cleanEmail);
+        const liked = p.likes.includes(currentUser.email);
         return {
           ...p,
           likes: liked 
-            ? p.likes.filter(e => e !== cleanEmail)
-            : [...p.likes, cleanEmail]
+            ? p.likes.filter(e => e !== currentUser.email)
+            : [...p.likes, currentUser.email]
         };
       }
       return p;
     });
     setCommunityPosts(newList);
     localStorage.setItem('oc_posts', JSON.stringify(newList));
-
-    // Sync like action to server
-    fetch(`/api/community-posts/${postId}/like`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userEmail: cleanEmail })
-    }).catch(() => {});
   };
 
   const addEvent = (event: Omit<ProfessionalEvent, 'id' | 'hostEmail' | 'hostName' | 'attendees'>) => {
     if (!currentUser) return;
     const newEvent: ProfessionalEvent = {
       ...event,
-      id: `ev_${Date.now()}`,
-      hostEmail: currentUser.email.trim().toLowerCase(),
+      id: Date.now().toString(),
+      hostEmail: currentUser.email,
       hostName: currentUser.bizName || currentUser.name || currentUser.email,
-      attendees: [currentUser.email.trim().toLowerCase()]
+      attendees: [currentUser.email]
     };
     const newList = [newEvent, ...events];
     setEvents(newList);
     localStorage.setItem('oc_events', JSON.stringify(newList));
-
-    fetch('/api/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newEvent)
-    }).catch(() => {});
   };
 
   const joinEvent = (eventId: string) => {
     if (!currentUser) return;
-    const cleanEmail = currentUser.email.trim().toLowerCase();
     const newList = events.map(e => {
       if (e.id === eventId) {
-        const attending = (e.attendees || []).includes(cleanEmail);
+        const attending = e.attendees.includes(currentUser.email);
         return {
           ...e,
           attendees: attending 
-            ? e.attendees.filter(a => a !== cleanEmail)
-            : [...(e.attendees || []), cleanEmail]
+            ? e.attendees.filter(a => a !== currentUser.email)
+            : [...e.attendees, currentUser.email]
         };
       }
       return e;
     });
     setEvents(newList);
     localStorage.setItem('oc_events', JSON.stringify(newList));
-
-    fetch(`/api/events/${eventId}/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userEmail: cleanEmail })
-    }).catch(() => {});
   };
 
   const addNotificationTo = (email: string, notif: Omit<Notification, 'id' | 'time' | 'read'>) => {
@@ -745,14 +569,17 @@ export function useAppStorage() {
     });
   };
 
-  const toggleUserAdmin = (email: string, makeAdmin: boolean) => {
+  const toggleUserAdmin = (email: string, _isAdmin: boolean) => {
     const cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail !== 'adrielaturinda4@gmail.com') {
+      return;
+    }
     const targetUser = users[cleanEmail];
     if (!targetUser) return;
 
     const updated: User = {
       ...targetUser,
-      isAdmin: makeAdmin
+      isAdmin: true
     };
 
     saveUser(updated);
@@ -762,7 +589,6 @@ export function useAppStorage() {
     const updated = jobs.filter(j => j.id !== jobId);
     setJobs(updated);
     localStorage.setItem('oc_jobs', JSON.stringify(updated));
-    fetch(`/api/jobs/${jobId}`, { method: 'DELETE' }).catch(() => {});
   };
 
   const deleteAnnouncement = (annId: number) => {
@@ -775,7 +601,6 @@ export function useAppStorage() {
     const updated = communityPosts.filter(p => p.id !== postId);
     setCommunityPosts(updated);
     localStorage.setItem('oc_posts', JSON.stringify(updated));
-    fetch(`/api/community-posts/${postId}`, { method: 'DELETE' }).catch(() => {});
   };
 
   const deleteEvent = (eventId: string) => {

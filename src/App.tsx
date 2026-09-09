@@ -84,6 +84,9 @@ const calcRating = (ratings: number[] = []) => {
   return (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1);
 };
 
+const getFallbackAvatar = (name: string = 'U') => 
+  `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="%230F1923"/><text x="50%" y="55%" font-family="sans-serif" font-weight="bold" font-size="38" fill="%23C9A84C" dominant-baseline="middle" text-anchor="middle">${encodeURIComponent((name || 'U').charAt(0).toUpperCase())}</text></svg>`;
+
 export default function App() {
   const {
     currentUser,
@@ -1187,9 +1190,10 @@ export default function App() {
 
       {/* Sidebar */}
       <aside className={`
-        fixed lg:sticky top-0 left-0 h-screen w-64 bg-oc-navy text-white z-50 transform transition-transform duration-300
+        fixed lg:sticky top-0 left-0 h-screen w-64 shrink-0 bg-oc-navy text-white z-50 isolate
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        flex flex-col border-r border-oc-gold/10
+        lg:transform-none transition-transform duration-300
+        flex flex-col border-r border-oc-gold/10 shadow-2xl lg:shadow-none
       `}>
         <div className="p-8 border-b border-oc-gold/10">
           <div className="text-xl font-serif font-bold text-oc-gold-light tracking-tight">Online Corporate</div>
@@ -1266,7 +1270,7 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 relative z-0">
         <header className="h-16 flex items-center px-6 bg-white dark:bg-oc-navy border-b border-oc-gold/5 sticky top-0 z-30">
           <button className="lg:hidden p-2 -ml-2 text-oc-navy dark:text-oc-gold/80" onClick={() => setIsSidebarOpen(true)}>
             <Menu size={24} />
@@ -1953,10 +1957,10 @@ export default function App() {
               )}
 
               {activePage === 'messages' && (
-                <div className="bg-white dark:bg-oc-navy border border-oc-gold/5 rounded-2xl h-[calc(100vh-12rem)] flex overflow-hidden shadow-xl">
+                <div className="bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-2xl h-[calc(100vh-13.5rem)] lg:h-[calc(100vh-9.5rem)] min-h-[460px] flex overflow-hidden shadow-xl relative isolate">
                   {/* Threads */}
-                  <div className={`w-full sm:w-80 border-r border-oc-gold/5 flex flex-col ${activeConversation ? 'hidden sm:flex' : 'flex'}`}>
-                    <div className="p-4 border-b border-oc-gold/5 bg-oc-cream/20">
+                  <div className={`w-full sm:w-80 shrink-0 border-r border-oc-gold/10 flex flex-col bg-white dark:bg-oc-navy ${activeConversation ? 'hidden sm:flex' : 'flex'}`}>
+                    <div className="p-4 border-b border-oc-gold/10 bg-oc-cream/20 shrink-0">
                       <h3 className="font-serif font-bold text-lg">Conversations</h3>
                     </div>
                     <div className="flex-1 overflow-y-auto">
@@ -1998,7 +2002,11 @@ export default function App() {
                               }}
                               className={`w-full text-left p-4 border-b border-oc-gold/5 hover:bg-oc-gold/5 transition-all flex gap-3 items-center ${activeConversation?.trim().toLowerCase() === otherEmail ? 'bg-oc-gold/10' : ''}`}
                             >
-                              <img src={otherUser?.photo || otherUser?.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover" alt="" />
+                              <img 
+                                src={otherUser?.photo || otherUser?.logo || getFallbackAvatar(otherUser?.name || otherUser?.bizName || otherEmail)} 
+                                className="w-10 h-10 rounded-full object-cover shrink-0 border border-oc-gold/10" 
+                                alt="" 
+                              />
                               <div className="flex-1 min-w-0">
                                 <div className="flex justify-between items-baseline mb-1">
                                   <div className="font-bold text-sm truncate">{otherUser?.name || otherUser?.bizName || otherEmail}</div>
@@ -2025,11 +2033,11 @@ export default function App() {
                   </div>
 
                   {/* Current Thread */}
-                  <div className={`flex-1 flex flex-col bg-oc-cream/10 dark:bg-oc-navy-mid/10 ${!activeConversation ? 'hidden sm:flex' : 'flex'}`}>
+                  <div className={`flex-1 min-w-0 flex flex-col bg-oc-cream/10 dark:bg-oc-navy-mid/10 ${!activeConversation ? 'hidden sm:flex' : 'flex'}`}>
                     {activeConversation ? (
                       <>
                         {/* Chat Header */}
-                        <div className="p-4 bg-white dark:bg-oc-navy border-b border-oc-gold/5 flex items-center gap-3">
+                        <div className="p-4 bg-white dark:bg-oc-navy border-b border-oc-gold/5 flex items-center gap-3 shrink-0">
                           <button 
                             className="sm:hidden p-2 -ml-2 text-gray-500" 
                             onClick={() => setActiveConversation(null)}
@@ -2037,8 +2045,8 @@ export default function App() {
                             <X size={20} />
                           </button>
                           <img 
-                            src={users[activeConversation]?.photo || users[activeConversation]?.logo || 'https://via.placeholder.com/32'} 
-                            className="w-8 h-8 rounded-full object-cover" 
+                            src={users[activeConversation]?.photo || users[activeConversation]?.logo || getFallbackAvatar(users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation)} 
+                            className="w-8 h-8 rounded-full object-cover shrink-0 border border-oc-gold/10" 
                             alt="" 
                           />
                           <div className="flex-1">

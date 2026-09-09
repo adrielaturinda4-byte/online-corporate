@@ -135,6 +135,7 @@ export default function App() {
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatMessagesContainerRef = useRef<HTMLDivElement>(null);
 
   const unreadMessagesCount = useMemo(() => {
     if (!currentUser?.email) return 0;
@@ -154,13 +155,22 @@ export default function App() {
     return count;
   }, [messages, currentUser?.email]);
 
-  // Auto-scroll chat to latest message and mark thread as read
+  // Auto-scroll chat to latest message and mark thread as read without scrolling the window
   useEffect(() => {
     if (activePage === 'messages' && activeConversation) {
       markThreadAsRead(activeConversation);
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      if (chatMessagesContainerRef.current) {
+        chatMessagesContainerRef.current.scrollTop = chatMessagesContainerRef.current.scrollHeight;
+      }
     }
   }, [activePage, activeConversation, markThreadAsRead]);
+
+  // Keep chat scrolled to bottom when messages update without scrolling window
+  useEffect(() => {
+    if (activePage === 'messages' && activeConversation && chatMessagesContainerRef.current) {
+      chatMessagesContainerRef.current.scrollTop = chatMessagesContainerRef.current.scrollHeight;
+    }
+  }, [messages, activeConversation, activePage]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => safeStorage.getItem('oc_dark') === 'true');
@@ -1195,12 +1205,12 @@ export default function App() {
         lg:transform-none transition-transform duration-300
         flex flex-col border-r border-oc-gold/10 shadow-2xl lg:shadow-none
       `}>
-        <div className="p-8 border-b border-oc-gold/10">
+        <div className="p-8 border-b border-oc-gold/10 bg-oc-navy">
           <div className="text-xl font-serif font-bold text-oc-gold-light tracking-tight">Online Corporate</div>
           <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 mt-1">Professional Network</div>
         </div>
         
-        <nav className="flex-1 overflow-y-auto pt-6 px-4 space-y-1">
+        <nav className="flex-1 overflow-y-auto pt-6 px-4 space-y-1 bg-oc-navy">
           {[
             { id: 'home', label: 'Home', icon: HomeIcon },
             { id: 'jobs', label: 'Jobs', icon: Briefcase },
@@ -1270,7 +1280,7 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 relative z-0">
+      <div className="flex-1 flex flex-col min-w-0 relative z-0 overflow-x-hidden">
         <header className="h-16 flex items-center px-6 bg-white dark:bg-oc-navy border-b border-oc-gold/5 sticky top-0 z-30">
           <button className="lg:hidden p-2 -ml-2 text-oc-navy dark:text-oc-gold/80" onClick={() => setIsSidebarOpen(true)}>
             <Menu size={24} />
@@ -1338,7 +1348,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="flex-1 p-4 sm:p-6 pb-28 lg:pb-8 max-w-6xl mx-auto w-full">
+        <main className={`flex-1 p-4 sm:p-6 max-w-6xl mx-auto w-full ${activePage === 'messages' ? 'pb-20 lg:pb-6' : 'pb-28 lg:pb-8'}`}>
           <AnimatePresence mode="wait">
             <motion.div
               key={activePage}
@@ -1957,7 +1967,7 @@ export default function App() {
               )}
 
               {activePage === 'messages' && (
-                <div className="bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-2xl h-[calc(100vh-13.5rem)] lg:h-[calc(100vh-9.5rem)] min-h-[460px] flex overflow-hidden shadow-xl relative isolate">
+                <div className="bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-2xl h-[calc(100dvh-10.5rem)] sm:h-[calc(100dvh-10rem)] lg:h-[calc(100dvh-7.5rem)] max-h-[calc(100dvh-10.5rem)] sm:max-h-[calc(100dvh-10rem)] lg:max-h-[calc(100dvh-7.5rem)] min-h-[350px] flex overflow-hidden shadow-xl relative isolate">
                   {/* Threads */}
                   <div className={`w-full sm:w-80 shrink-0 border-r border-oc-gold/10 flex flex-col bg-white dark:bg-oc-navy ${activeConversation ? 'hidden sm:flex' : 'flex'}`}>
                     <div className="p-4 border-b border-oc-gold/10 bg-oc-cream/20 shrink-0">
@@ -2056,7 +2066,7 @@ export default function App() {
                         </div>
 
                         {/* Chat Body */}
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
+                        <div ref={chatMessagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
                           {(() => {
                             const myEmail = currentUser?.email?.trim().toLowerCase() || '';
                             const cleanActive = (activeConversation || '').trim().toLowerCase();
@@ -3724,7 +3734,7 @@ export default function App() {
         {/* Mobile Bottom Navigation Bar */}
         <nav 
           aria-label="Mobile Navigation"
-          className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-[#0E1726]/95 backdrop-blur-md border-t border-oc-gold/15 py-1.5 px-2 flex items-center justify-around shadow-[0_-4px_20px_rgba(0,0,0,0.08)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)]"
+          className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white dark:bg-[#0E1726] border-t border-oc-gold/15 py-1.5 px-2 flex items-center justify-around shadow-[0_-4px_20px_rgba(0,0,0,0.08)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)]"
           style={{ paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom))' }}
         >
           <button

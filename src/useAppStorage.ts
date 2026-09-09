@@ -162,6 +162,78 @@ export function useAppStorage() {
       }
     });
 
+    // Check if the current window URL has OAuth hash parameters directly (e.g. redirected directly)
+    if (typeof window !== 'undefined' && window.location.hash) {
+      try {
+        const hash = window.location.hash.replace(/^#/, '');
+        if (hash.includes('access_token=')) {
+          const params = new URLSearchParams(hash);
+          const access_token = params.get('access_token');
+          const refresh_token = params.get('refresh_token');
+          if (access_token && refresh_token) {
+            supabase.auth.setSession({ access_token, refresh_token }).then(({ data }) => {
+              if (data?.session?.user && isMounted) {
+                syncSupabaseAuthUser(data.session.user);
+              }
+            }).catch(() => {});
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Popup OAuth listener for Google Sign In
+    const handleOAuthMessage = async (event: MessageEvent) => {
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        const hash = event.data.hash || '';
+        const search = event.data.search || '';
+
+        try {
+          if (hash) {
+            const cleanHash = hash.replace(/^#/, '');
+            const params = new URLSearchParams(cleanHash);
+            const access_token = params.get('access_token');
+            const refresh_token = params.get('refresh_token');
+
+            if (access_token && refresh_token) {
+              const { data: sessionData } = await supabase.auth.setSession({
+                access_token,
+                refresh_token,
+              });
+              if (sessionData?.session?.user && isMounted) {
+                syncSupabaseAuthUser(sessionData.session.user);
+                return;
+              }
+            }
+          }
+
+          if (search) {
+            const cleanSearch = search.replace(/^\?/, '');
+            const params = new URLSearchParams(cleanSearch);
+            const code = params.get('code');
+            if (code) {
+              const { data: sessionData } = await supabase.auth.exchangeCodeForSession(code);
+              if (sessionData?.session?.user && isMounted) {
+                syncSupabaseAuthUser(sessionData.session.user);
+                return;
+              }
+            }
+          }
+
+          // Fallback: check session from client
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user && isMounted) {
+            syncSupabaseAuthUser(session.user);
+          }
+        } catch (err) {
+          console.warn('Failed to process OAuth tokens from popup:', err);
+        }
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('message', handleOAuthMessage);
+    }
+
     // Fetch all registered user profiles from Supabase database in background
     fetchProfilesFromSupabase().then(remoteProfiles => {
       if (remoteProfiles && Array.isArray(remoteProfiles) && remoteProfiles.length > 0 && isMounted) {
@@ -184,6 +256,9 @@ export function useAppStorage() {
       try {
         authSub?.subscription?.unsubscribe();
       } catch (e) {}
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('message', handleOAuthMessage);
+      }
     };
   }, []);
 
@@ -458,14 +533,19 @@ export function useAppStorage() {
   };
 
   const markThreadAsRead = (otherEmail: string) => {
-    if (!currentUser) return;
+    if (!currentUser || !otherEmail) return;
     const cleanMy = currentUser.email.trim().toLowerCase();
     const cleanOther = otherEmail.trim().toLowerCase();
     const key = [cleanMy, cleanOther].sort().join('::');
     if (!messages[key]) return;
     
+    const hasUnread = (messages[key] || []).some(
+      m => (m.from || '').trim().toLowerCase() !== cleanMy && !m.read
+    );
+    if (!hasUnread) return;
+
     const updatedThread = (messages[key] || []).map(m => 
-      m.from !== cleanMy ? { ...m, read: true } : m
+      (m.from || '').trim().toLowerCase() !== cleanMy ? { ...m, read: true } : m
     );
     
     const newMsgs = { ...messages, [key]: updatedThread };

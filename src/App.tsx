@@ -133,12 +133,31 @@ export default function App() {
   const [messageInput, setMessageInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll chat to latest message
+  const unreadMessagesCount = useMemo(() => {
+    if (!currentUser?.email) return 0;
+    const myEmail = currentUser.email.trim().toLowerCase();
+    let count = 0;
+    for (const [key, threadMessages] of Object.entries(messages)) {
+      const participants = key.split('::').map(e => e.trim().toLowerCase());
+      if (participants.includes(myEmail)) {
+        for (const m of (threadMessages || [])) {
+          const fromEmail = (m?.from || '').trim().toLowerCase();
+          if (fromEmail !== myEmail && !m?.read) {
+            count++;
+          }
+        }
+      }
+    }
+    return count;
+  }, [messages, currentUser?.email]);
+
+  // Auto-scroll chat to latest message and mark thread as read
   useEffect(() => {
     if (activePage === 'messages' && activeConversation) {
+      markThreadAsRead(activeConversation);
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [activePage, activeConversation, messages]);
+  }, [activePage, activeConversation, markThreadAsRead]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => safeStorage.getItem('oc_dark') === 'true');
@@ -248,7 +267,7 @@ export default function App() {
   // Rating State
   const [submittingRating, setSubmittingRating] = useState(false);
 
-  // Handle initial route and new user onboarding
+  // Handle initial route and user onboarding
   React.useEffect(() => {
     try {
       const path = window.location.pathname;
@@ -257,17 +276,28 @@ export default function App() {
         setActivePage('about');
       } else if (!currentUser) {
         setActivePage('about');
-      } else if (currentUser && activePage === 'about') {
-        const hasInitiallyRouted = safeStorage.getItem('oc_routed');
-        if (!hasInitiallyRouted) {
+      } else if (currentUser) {
+        setIsGoogleLoading(false);
+        setShowSetupModal(false);
+        setShowRoleModal(false);
+        if (activePage === 'about') {
           setActivePage('home');
-          safeStorage.setItem('oc_routed', 'true');
         }
       }
     } catch (e) {
       console.warn('Initial routing error:', e);
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      document.documentElement.style.colorScheme = 'dark';
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.style.colorScheme = 'light';
+    }
+  }, [isDarkMode]);
 
   const toggleDarkMode = () => {
     const newVal = !isDarkMode;
@@ -391,6 +421,11 @@ export default function App() {
       if (!res.success && res.error) {
         setAuthError(res.error);
         setIsGoogleLoading(false);
+      } else {
+        // Reset loading state after 60s if user cancels or closes popup
+        setTimeout(() => {
+          setIsGoogleLoading(false);
+        }, 60000);
       }
     } catch (err: any) {
       setAuthError(err?.message || 'Failed to initialize Google Sign In');
@@ -983,7 +1018,7 @@ export default function App() {
               <button 
                 type="submit"
                 disabled={isAuthLoading}
-                className="w-full bg-oc-navy hover:bg-oc-navy-mid text-oc-gold font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-oc-navy/20 flex items-center justify-center gap-2 mt-2 disabled:opacity-70"
+                className="w-full bg-oc-navy hover:bg-oc-navy-mid dark:bg-oc-gold dark:hover:bg-oc-gold-light text-oc-gold dark:text-oc-navy font-bold py-3.5 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 mt-2 disabled:opacity-70 cursor-pointer disabled:cursor-not-allowed"
               >
                 {isAuthLoading ? (
                   <>
@@ -1168,7 +1203,7 @@ export default function App() {
             { id: 'applications', label: 'Applications', icon: CheckCircle, badge: (currentUser?.role === 'Employer' || currentUser?.role === 'BusinessOwner') ? applications.filter(a => a.employerEmail === currentUser.email && a.status === 'Applied').length : 0 },
             { id: 'community', label: 'Community', icon: Globe },
             { id: 'events', label: 'Events', icon: CalendarDays },
-            { id: 'messages', label: 'Messages', icon: MessageSquare, badge: Object.values(messages).flat().filter((m: any) => m.from !== currentUser?.email && !m.read).length },
+            { id: 'messages', label: 'Messages', icon: MessageSquare, badge: unreadMessagesCount },
             { id: 'notifications', label: 'Notifications', icon: Bell, badge: notifications.filter(n => !n.read).length },
             { id: 'card', label: 'My Card', icon: UserCircle },
             ...(isMainAdmin ? [{ id: 'admin', label: 'Admin Controls', icon: Shield, badge: pendingVerificationsCount }] : []),
@@ -1281,12 +1316,14 @@ export default function App() {
             )}
             <button 
               onClick={toggleDarkMode}
-              className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-white/5 text-gray-500 transition-colors"
+              className="p-2 rounded-xl hover:bg-oc-gold/10 text-gray-500 hover:text-oc-navy dark:hover:text-oc-gold transition-colors cursor-pointer"
+              title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label="Toggle dark/light mode"
             >
-              {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+              {isDarkMode ? <Sun size={20} className="text-oc-gold" /> : <Moon size={20} className="text-oc-navy" />}
             </button>
-            <div className="h-8 w-px bg-oc-gold/10 mx-2" />
-            <div className="text-right hidden xs:block">
+            <div className="h-8 w-px bg-oc-gold/10 mx-2 hidden sm:block" />
+            <div className="text-right hidden sm:block">
               <div className="text-sm font-semibold text-oc-navy dark:text-white">
                 {currentUser?.bizName || currentUser?.name || currentUser?.email}
               </div>
@@ -1297,7 +1334,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="flex-1 p-6 max-w-6xl mx-auto w-full">
+        <main className="flex-1 p-4 sm:p-6 pb-28 lg:pb-8 max-w-6xl mx-auto w-full">
           <AnimatePresence mode="wait">
             <motion.div
               key={activePage}
@@ -1923,57 +1960,67 @@ export default function App() {
                       <h3 className="font-serif font-bold text-lg">Conversations</h3>
                     </div>
                     <div className="flex-1 overflow-y-auto">
-                      {Object.keys(messages).filter(k => k.includes(currentUser?.email || '')).length > 0 ? (
-                        Object.keys(messages)
-                          .filter(k => k.includes(currentUser?.email || ''))
-                          .sort((a, b) => {
-                            const lastA = messages[a][messages[a].length - 1]?.time || 0;
-                            const lastB = messages[b][messages[b].length - 1]?.time || 0;
-                            return lastB - lastA;
-                          })
-                          .map(key => {
-                            const otherEmail = key.split('::').find(e => e !== currentUser?.email);
-                            const otherUser = otherEmail ? users[otherEmail] : null;
-                            const lastMsg = messages[key][messages[key].length - 1];
-                            const unreadCount = messages[key].filter(m => m.from !== currentUser?.email && !m.read).length;
+                      {(() => {
+                        const myEmail = currentUser?.email?.trim().toLowerCase() || '';
+                        const myThreadKeys = Object.keys(messages).filter(k => {
+                          if (!myEmail) return false;
+                          const parts = k.split('::').map(e => e.trim().toLowerCase());
+                          return parts.includes(myEmail);
+                        }).sort((a, b) => {
+                          const lastA = messages[a]?.[messages[a].length - 1]?.time || 0;
+                          const lastB = messages[b]?.[messages[b].length - 1]?.time || 0;
+                          return lastB - lastA;
+                        });
 
-                            return (
-                              <button
-                                key={key}
-                                onClick={() => {
-                                  setActiveConversation(otherEmail || null);
-                                  if (otherEmail) markThreadAsRead(otherEmail);
-                                }}
-                                className={`w-full text-left p-4 border-b border-oc-gold/5 hover:bg-oc-gold/5 transition-all flex gap-3 items-center ${activeConversation === otherEmail ? 'bg-oc-gold/10' : ''}`}
-                              >
-                                <img src={otherUser?.photo || otherUser?.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover" alt="" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex justify-between items-baseline mb-1">
-                                    <div className="font-bold text-sm truncate">{otherUser?.name || otherUser?.bizName || otherEmail}</div>
-                                    <div className="text-[9px] text-gray-400 whitespace-nowrap ml-2">
-                                      {lastMsg ? new Date(lastMsg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                                    </div>
-                                  </div>
-                                  <div className="text-xs text-gray-500 truncate flex justify-between items-center">
-                                    <span className={unreadCount > 0 ? 'font-bold text-oc-navy dark:text-white' : ''}>
-                                      {lastMsg?.text || 'No messages'}
-                                    </span>
-                                    {unreadCount > 0 && (
-                                      <span className="bg-oc-gold text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full ml-2">
-                                        {unreadCount}
-                                      </span>
-                                    )}
+                        if (myThreadKeys.length === 0) {
+                          return (
+                            <div className="p-8 text-center text-gray-500">
+                              <MessageSquare className="mx-auto mb-3 opacity-20" size={32} />
+                              <p className="text-xs">Select a member from the directory to start a conversation</p>
+                            </div>
+                          );
+                        }
+
+                        return myThreadKeys.map(key => {
+                          const parts = key.split('::').map(e => e.trim().toLowerCase());
+                          const otherEmail = parts.find(e => e !== myEmail) || '';
+                          const otherUser = otherEmail ? users[otherEmail] : null;
+                          const threadMsgs = messages[key] || [];
+                          const lastMsg = threadMsgs[threadMsgs.length - 1];
+                          const unreadCount = threadMsgs.filter(m => (m.from || '').trim().toLowerCase() !== myEmail && !m.read).length;
+
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => {
+                                setActiveConversation(otherEmail || null);
+                                if (otherEmail) markThreadAsRead(otherEmail);
+                              }}
+                              className={`w-full text-left p-4 border-b border-oc-gold/5 hover:bg-oc-gold/5 transition-all flex gap-3 items-center ${activeConversation?.trim().toLowerCase() === otherEmail ? 'bg-oc-gold/10' : ''}`}
+                            >
+                              <img src={otherUser?.photo || otherUser?.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover" alt="" />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-baseline mb-1">
+                                  <div className="font-bold text-sm truncate">{otherUser?.name || otherUser?.bizName || otherEmail}</div>
+                                  <div className="text-[9px] text-gray-400 whitespace-nowrap ml-2">
+                                    {lastMsg ? new Date(lastMsg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                   </div>
                                 </div>
-                              </button>
-                            );
-                          })
-                      ) : (
-                        <div className="p-8 text-center text-gray-500">
-                          <MessageSquare className="mx-auto mb-3 opacity-20" size={32} />
-                          <p className="text-xs">Select a member from the directory to start a conversation</p>
-                        </div>
-                      )}
+                                <div className="text-xs text-gray-500 truncate flex justify-between items-center">
+                                  <span className={unreadCount > 0 ? 'font-bold text-oc-navy dark:text-white' : ''}>
+                                    {lastMsg?.text || 'No messages'}
+                                  </span>
+                                  {unreadCount > 0 && (
+                                    <span className="bg-oc-gold text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full ml-2">
+                                      {unreadCount}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
 
@@ -2002,42 +2049,53 @@ export default function App() {
 
                         {/* Chat Body */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
-                          {(!messages[[currentUser?.email, activeConversation].sort().join('::')] || messages[[currentUser?.email, activeConversation].sort().join('::')].length === 0) && (
-                            <div className="text-center py-12 text-gray-400 space-y-3">
-                              <div className="w-14 h-14 rounded-2xl bg-oc-gold/10 text-oc-gold flex items-center justify-center mx-auto">
-                                <MessageSquare size={24} />
-                              </div>
-                              <h4 className="font-bold text-sm text-oc-navy dark:text-oc-gold-light">
-                                Start chatting with {users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}
-                              </h4>
-                              <p className="text-xs text-gray-400 max-w-xs mx-auto">
-                                Messages sent here are synced in real-time across both of your accounts and devices.
-                              </p>
-                            </div>
-                          )}
+                          {(() => {
+                            const myEmail = currentUser?.email?.trim().toLowerCase() || '';
+                            const cleanActive = (activeConversation || '').trim().toLowerCase();
+                            const threadKey = myEmail && cleanActive ? [myEmail, cleanActive].sort().join('::') : '';
+                            const currentThread = threadKey ? (messages[threadKey] || []) : [];
 
-                          {messages[[currentUser?.email, activeConversation].sort().join('::')]?.map((m: any, idx: number) => {
-                            const isMine = m.from === currentUser?.email;
                             return (
-                              <div key={idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[80%] p-3.5 rounded-2xl text-sm ${
-                                  isMine 
-                                    ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy rounded-tr-none shadow-sm' 
-                                    : 'bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-tl-none shadow-sm text-oc-navy dark:text-white'
-                                }`}>
-                                  <div className="leading-relaxed break-words whitespace-pre-wrap">{m.text}</div>
-                                  <div className={`text-[9px] mt-1.5 flex items-center justify-end gap-1 opacity-70 ${isMine ? 'text-oc-gold dark:text-oc-navy' : 'text-gray-400'}`}>
-                                    <span>{new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                    {isMine && (
-                                      <span title={m.read ? "Read" : "Delivered"}>
-                                        {m.read ? "✓✓" : "✓"}
-                                      </span>
-                                    )}
+                              <>
+                                {currentThread.length === 0 && (
+                                  <div className="text-center py-12 text-gray-400 space-y-3">
+                                    <div className="w-14 h-14 rounded-2xl bg-oc-gold/10 text-oc-gold flex items-center justify-center mx-auto">
+                                      <MessageSquare size={24} />
+                                    </div>
+                                    <h4 className="font-bold text-sm text-oc-navy dark:text-oc-gold-light">
+                                      Start chatting with {users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}
+                                    </h4>
+                                    <p className="text-xs text-gray-400 max-w-xs mx-auto">
+                                      Messages sent here are synced in real-time across both of your accounts and devices.
+                                    </p>
                                   </div>
-                                </div>
-                              </div>
+                                )}
+
+                                {currentThread.map((m: any, idx: number) => {
+                                  const isMine = (m.from || '').trim().toLowerCase() === myEmail;
+                                  return (
+                                    <div key={idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+                                      <div className={`max-w-[80%] p-3.5 rounded-2xl text-sm ${
+                                        isMine 
+                                          ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy rounded-tr-none shadow-sm' 
+                                          : 'bg-white dark:bg-oc-navy border border-oc-gold/10 rounded-tl-none shadow-sm text-oc-navy dark:text-white'
+                                      }`}>
+                                        <div className="leading-relaxed break-words whitespace-pre-wrap">{m.text}</div>
+                                        <div className={`text-[9px] mt-1.5 flex items-center justify-end gap-1 opacity-70 ${isMine ? 'text-oc-gold dark:text-oc-navy' : 'text-gray-400'}`}>
+                                          <span>{new Date(m.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                          {isMine && (
+                                            <span title={m.read ? "Read" : "Delivered"}>
+                                              {m.read ? "✓✓" : "✓"}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </>
                             );
-                          })}
+                          })()}
                           <div ref={messagesEndRef} />
                         </div>
 
@@ -3654,6 +3712,104 @@ export default function App() {
             </motion.div>
           </AnimatePresence>
         </main>
+
+        {/* Mobile Bottom Navigation Bar */}
+        <nav 
+          aria-label="Mobile Navigation"
+          className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-[#0E1726]/95 backdrop-blur-md border-t border-oc-gold/15 py-1.5 px-2 flex items-center justify-around shadow-[0_-4px_20px_rgba(0,0,0,0.08)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)]"
+          style={{ paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom))' }}
+        >
+          <button
+            onClick={() => { setActivePage('home'); setIsSidebarOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-all cursor-pointer ${
+              activePage === 'home'
+                ? 'text-oc-navy dark:text-oc-gold font-bold scale-105'
+                : 'text-gray-400 hover:text-oc-navy dark:hover:text-white'
+            }`}
+          >
+            <div className={`p-1 rounded-lg ${activePage === 'home' ? 'bg-oc-gold/15 text-oc-gold' : ''}`}>
+              <HomeIcon size={19} />
+            </div>
+            <span className="text-[10px] mt-0.5 tracking-tight">Home</span>
+          </button>
+
+          <button
+            onClick={() => { setActivePage('jobs'); setIsSidebarOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-all cursor-pointer ${
+              activePage === 'jobs'
+                ? 'text-oc-navy dark:text-oc-gold font-bold scale-105'
+                : 'text-gray-400 hover:text-oc-navy dark:hover:text-white'
+            }`}
+          >
+            <div className={`p-1 rounded-lg ${activePage === 'jobs' ? 'bg-oc-gold/15 text-oc-gold' : ''}`}>
+              <Briefcase size={19} />
+            </div>
+            <span className="text-[10px] mt-0.5 tracking-tight">Jobs</span>
+          </button>
+
+          <button
+            onClick={() => { setActivePage('community'); setIsSidebarOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-all cursor-pointer ${
+              activePage === 'community'
+                ? 'text-oc-navy dark:text-oc-gold font-bold scale-105'
+                : 'text-gray-400 hover:text-oc-navy dark:hover:text-white'
+            }`}
+          >
+            <div className={`p-1 rounded-lg ${activePage === 'community' ? 'bg-oc-gold/15 text-oc-gold' : ''}`}>
+              <Globe size={19} />
+            </div>
+            <span className="text-[10px] mt-0.5 tracking-tight">Feed</span>
+          </button>
+
+          <button
+            onClick={() => { setActivePage('messages'); setIsSidebarOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl relative transition-all cursor-pointer ${
+              activePage === 'messages'
+                ? 'text-oc-navy dark:text-oc-gold font-bold scale-105'
+                : 'text-gray-400 hover:text-oc-navy dark:hover:text-white'
+            }`}
+          >
+            <div className={`p-1 rounded-lg relative ${activePage === 'messages' ? 'bg-oc-gold/15 text-oc-gold' : ''}`}>
+              <MessageSquare size={19} />
+              {unreadMessagesCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center animate-pulse">
+                  {unreadMessagesCount > 9 ? '9+' : unreadMessagesCount}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] mt-0.5 tracking-tight">Chat</span>
+          </button>
+
+          {currentUser ? (
+            <button
+              onClick={() => { setActivePage('card'); setIsSidebarOpen(false); }}
+              className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-all cursor-pointer ${
+                activePage === 'card'
+                  ? 'text-oc-navy dark:text-oc-gold font-bold scale-105'
+                  : 'text-gray-400 hover:text-oc-navy dark:hover:text-white'
+              }`}
+            >
+              <div className={`p-1 rounded-lg ${activePage === 'card' ? 'bg-oc-gold/15 text-oc-gold' : ''}`}>
+                <UserCircle size={19} />
+              </div>
+              <span className="text-[10px] mt-0.5 tracking-tight">Card</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => { setActivePage('about'); setIsSidebarOpen(false); }}
+              className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-all cursor-pointer ${
+                activePage === 'about'
+                  ? 'text-oc-navy dark:text-oc-gold font-bold scale-105'
+                  : 'text-gray-400 hover:text-oc-navy dark:hover:text-white'
+              }`}
+            >
+              <div className={`p-1 rounded-lg ${activePage === 'about' ? 'bg-oc-gold/15 text-oc-gold' : ''}`}>
+                <Building size={19} />
+              </div>
+              <span className="text-[10px] mt-0.5 tracking-tight">About</span>
+            </button>
+          )}
+        </nav>
       </div>
 
       {/* --- Modals --- */}
@@ -3665,7 +3821,7 @@ export default function App() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setViewingProfile(null)} />
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl overflow-hidden shadow-2xl border border-oc-gold/10"
+              className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl overflow-hidden shadow-2xl border border-oc-gold/10 max-h-[92vh] overflow-y-auto"
             >
               <div className="h-32 bg-oc-navy-mid" />
               <div className="px-8 pb-8 relative">
@@ -3921,7 +4077,7 @@ export default function App() {
              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowJobModal(false)} />
              <motion.div 
                initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-               className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10"
+               className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/10 max-h-[92vh] overflow-y-auto"
              >
                <h2 className="text-2xl font-serif font-bold mb-6">Post a Vacancy</h2>
                <form onSubmit={(e) => {
@@ -3957,7 +4113,7 @@ export default function App() {
                  <input required name="location" placeholder="Location" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
                  <input required name="contact" placeholder="Email/Phone to apply" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
                  <textarea required name="desc" placeholder="Job details..." className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none h-32" />
-                 <button className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-4 rounded-xl shadow-lg">Post Listing</button>
+                 <button className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-4 rounded-xl shadow-lg cursor-pointer">Post Listing</button>
                </form>
              </motion.div>
           </div>
@@ -3971,7 +4127,7 @@ export default function App() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowAddEventModal(false)} />
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10"
+              className="relative w-full max-w-lg bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/10 max-h-[92vh] overflow-y-auto"
             >
               <h2 className="text-2xl font-serif font-bold mb-6">Host Professional Event</h2>
               <form onSubmit={(e) => {
@@ -3997,7 +4153,7 @@ export default function App() {
                 </div>
                 <input required name="location" placeholder="Location (e.g. Zoom, Sheraton Hotel)" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />
                 <textarea required name="description" placeholder="What is this event about?" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none h-32" />
-                <button className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-4 rounded-xl shadow-lg">Schedule Event</button>
+                <button className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-4 rounded-xl shadow-lg cursor-pointer">Schedule Event</button>
               </form>
             </motion.div>
           </div>
@@ -4011,7 +4167,7 @@ export default function App() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setAssigningStaff(null)} />
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10"
+              className="relative w-full max-w-sm bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/10 max-h-[92vh] overflow-y-auto"
             >
               <h2 className="text-xl font-serif font-bold mb-1">Assign Post</h2>
               <p className="text-xs text-gray-500 mb-6 font-medium">Setting role for {assigningStaff.name}</p>
@@ -4021,7 +4177,7 @@ export default function App() {
                   <button 
                     key={p} 
                     onClick={() => updateStaffPost(assigningStaff.email, p)}
-                    className="px-3 py-1.5 bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-full text-[10px] font-bold text-oc-navy dark:text-oc-gold-light hover:bg-oc-gold hover:text-white transition-all capitalize"
+                    className="px-3 py-1.5 bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-full text-[10px] font-bold text-oc-navy dark:text-oc-gold-light hover:bg-oc-gold hover:text-white transition-all capitalize cursor-pointer"
                   >
                     {p}
                   </button>
@@ -4039,7 +4195,7 @@ export default function App() {
                 />
                 <button 
                   onClick={() => setAssigningStaff(null)}
-                  className="w-full py-3 text-sm font-bold text-gray-500 hover:text-oc-navy transition-colors"
+                  className="w-full py-3 text-sm font-bold text-gray-500 hover:text-oc-navy dark:hover:text-white transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -4056,7 +4212,7 @@ export default function App() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !isApplying && setApplyingForJob(null)} />
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10"
+              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-6 sm:p-8 shadow-2xl border border-oc-gold/10 max-h-[92vh] overflow-y-auto"
             >
               {!isApplying ? (
                 <>
@@ -5411,7 +5567,7 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-6 shadow-2xl border border-oc-gold/20 space-y-5 z-10"
+              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-6 shadow-2xl border border-oc-gold/20 space-y-5 z-10 max-h-[92vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between border-b border-oc-gold/10 pb-3">
                 <h3 className="text-base font-serif font-bold text-oc-navy dark:text-oc-gold-light">

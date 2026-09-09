@@ -57,6 +57,77 @@ async function startServer() {
     });
   });
 
+  // OAuth Callback Handler for Google Sign-In popups
+  app.get(['/auth/callback', '/auth/callback/'], (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Online Corporate - Authenticating</title>
+  <style>
+    body {
+      background-color: #0F1923;
+      color: #E8CC7A;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      text-align: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid rgba(201, 168, 76, 0.2);
+      border-top-color: #C9A84C;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h2 { margin: 0 0 8px; font-size: 20px; font-weight: 600; color: #FFFFFF; }
+    p { margin: 0; font-size: 14px; color: #94A3B8; }
+  </style>
+</head>
+<body>
+  <div class="spinner"></div>
+  <h2>Completing Sign In...</h2>
+  <p>Authenticating your account. This window will close automatically.</p>
+  <script>
+    (function() {
+      try {
+        var hash = window.location.hash || '';
+        var search = window.location.search || '';
+        var payload = {
+          type: 'OAUTH_AUTH_SUCCESS',
+          provider: 'google',
+          hash: hash,
+          search: search
+        };
+
+        if (window.opener) {
+          window.opener.postMessage(payload, '*');
+          setTimeout(function() {
+            window.close();
+          }, 600);
+        } else {
+          window.location.href = '/' + (hash ? hash : search);
+        }
+      } catch (err) {
+        console.error('Error posting OAuth callback message:', err);
+      }
+    })();
+  </script>
+</body>
+</html>`);
+  });
+
   // Supabase connection and status check
   app.get("/api/supabase/status", async (req, res) => {
     try {

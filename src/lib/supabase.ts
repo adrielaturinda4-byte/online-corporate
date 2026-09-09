@@ -152,11 +152,63 @@ export async function signInWithSupabase(
 }
 
 /**
- * Sign in / Sign up with Google via Supabase OAuth
+ * Sign in / Sign up with Google via Supabase OAuth (Popup-based for iframe safety)
  */
 export async function signInWithGoogle(): Promise<{ success: boolean; error?: string; url?: string }> {
   try {
-    const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}` : '';
+    if (typeof window === 'undefined') {
+      return { success: false, error: 'Browser window is not defined' };
+    }
+
+    // AI Studio iframe safety:
+    // Direct in-frame redirects to accounts.google.com are blocked by Google with X-Frame-Options: DENY.
+    // Opening a dedicated popup window allows the user to securely authorize their Google account.
+    const width = 560;
+    const height = 650;
+    const left = window.screenX + Math.max(0, (window.outerWidth - width) / 2);
+    const top = window.screenY + Math.max(0, (window.outerHeight - height) / 2);
+
+    const authPopup = window.open(
+      'about:blank',
+      'oc_google_auth',
+      `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`
+    );
+
+    if (!authPopup) {
+      return {
+        success: false,
+        error: 'Popup was blocked by your browser. Please allow popups for this site and try again.',
+      };
+    }
+
+    try {
+      authPopup.document.write(`<!DOCTYPE html>
+<html>
+  <head>
+    <title>Connecting to Google...</title>
+    <style>
+      body {
+        background-color: #0F1923;
+        color: #E8CC7A;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        margin: 0;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <p style="font-size: 16px; font-weight: 600;">Connecting to Google...</p>
+  </body>
+</html>`);
+    } catch (e) {}
+
+    const redirectUrl = `${window.location.origin}/auth/callback`;
+
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -169,14 +221,17 @@ export async function signInWithGoogle(): Promise<{ success: boolean; error?: st
     });
 
     if (error) {
+      try { authPopup.close(); } catch (e) {}
       return { success: false, error: error.message };
     }
 
     if (data?.url) {
-      window.location.href = data.url;
+      authPopup.location.href = data.url;
+      return { success: true, url: data.url };
+    } else {
+      try { authPopup.close(); } catch (e) {}
+      return { success: false, error: 'Could not obtain Google authorization URL' };
     }
-
-    return { success: true, url: data?.url };
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to initialize Google Sign In' };
   }

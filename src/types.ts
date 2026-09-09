@@ -19,8 +19,6 @@ export interface User {
   email: string;
   password?: string;
   isVerified?: boolean;
-  documentsAuthorized?: boolean;
-  trustedBadge?: boolean;
   verificationCode?: string;
   role?: UserRole;
   name?: string;
@@ -55,32 +53,6 @@ export interface User {
   verificationDoc?: string;
   verificationType?: string;
   verificationReason?: string;
-  verificationAnalysis?: VerificationAnalysis;
-}
-
-export interface SecurityCheckItem {
-  id: string;
-  label: string;
-  passed: boolean;
-  detail: string;
-}
-
-export interface VerificationAnalysis {
-  verified: boolean;
-  confidence: number;
-  documentTypeDetected?: string;
-  holderName?: string;
-  documentNumber?: string;
-  issuingAuthority?: string;
-  expiryDate?: string;
-  nameMatch?: {
-    matches: boolean;
-    explanation: string;
-  };
-  securityChecks?: SecurityCheckItem[];
-  recommendation: 'auto_approved' | 'flagged_for_manual_review' | 'rejected_illegible' | 'rejected_fraud_risk' | string;
-  reason: string;
-  analyzedAt?: number;
 }
 
 export interface ProfessionalEvent {

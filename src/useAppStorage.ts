@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, Announcement, Job, Notification, Message, JobSearchHistory, CommunityPost, ProfessionalEvent, JobApplication, ApplicationStatus, Appointment } from './types';
+import { User, Announcement, Job, Notification, Message, JobSearchHistory, CommunityPost, PortfolioItem, ProfessionalEvent, JobApplication, ApplicationStatus, Appointment } from './types';
 import { 
   supabase, 
   signOutFromSupabase, 
@@ -11,268 +11,163 @@ import {
   markMessagesAsReadInSupabase,
   subscribeToMessages
 } from './lib/supabase';
-import { safeStorage } from './lib/safeStorage';
-
-const FAKE_SEED_EMAILS = ['employee@corporate.com', 'employer@corporate.com', 'owner@corporate.com'];
-const ADMIN_EMAIL = 'adrielaturinda4@gmail.com';
-
-function getInitialUsers(): Record<string, User> {
-  const loadedUsers: Record<string, User> = {};
-  
-  // Remove legacy fake seeds if present
-  try {
-    FAKE_SEED_EMAILS.forEach(email => {
-      safeStorage.removeItem(`oc_u_${email}`);
-    });
-
-    const keys = safeStorage.getAllKeys();
-    for (const key of keys) {
-      if (key.startsWith('oc_u_')) {
-        const u = safeStorage.getJSON<User | null>(key, null);
-        if (u && typeof u.email === 'string' && !FAKE_SEED_EMAILS.includes(u.email.trim().toLowerCase())) {
-          const e = u.email.trim().toLowerCase();
-          if (e !== ADMIN_EMAIL) {
-            u.isAdmin = false;
-          }
-          loadedUsers[e] = u;
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('Error reading initial users from storage:', e);
-  }
-
-  // Ensure Admin user exists with proper permissions
-  const existingAdmin = loadedUsers[ADMIN_EMAIL];
-  const adminUser: User = {
-    ...(existingAdmin || {}),
-    email: ADMIN_EMAIL,
-    password: 'adrielissocool1',
-    isAdmin: true,
-    isVerified: true,
-    documentsAuthorized: true,
-    trustedBadge: true,
-    name: existingAdmin?.name || 'Adriel Aturinda',
-    bizName: existingAdmin?.bizName || 'Online Corporate Administration',
-    role: existingAdmin?.role || 'BusinessOwner',
-    country: existingAdmin?.country || 'Uganda',
-    description: existingAdmin?.description || 'Platform Administrator & Founder'
-  };
-  loadedUsers[ADMIN_EMAIL] = adminUser;
-  safeStorage.setJSON(`oc_u_${ADMIN_EMAIL}`, adminUser);
-
-  return loadedUsers;
-}
-
-function getInitialCurrentUser(loadedUsers: Record<string, User>): User | null {
-  try {
-    const rawLogged = safeStorage.getItem('oc_logged');
-    const loggedEmail = typeof rawLogged === 'string' ? rawLogged.trim().toLowerCase() : null;
-    if (loggedEmail && loadedUsers[loggedEmail]) {
-      return loadedUsers[loggedEmail];
-    }
-  } catch (e) {}
-  return null;
-}
 
 export function useAppStorage() {
-  const [users, setUsers] = useState<Record<string, User>>(() => getInitialUsers());
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const initUsers = getInitialUsers();
-    return getInitialCurrentUser(initUsers);
-  });
-  const [announcements, setAnnouncements] = useState<Announcement[]>(() => safeStorage.getJSON<Announcement[]>('oc_ann', []));
-  const [jobs, setJobs] = useState<Job[]>(() => safeStorage.getJSON<Job[]>('oc_jobs', []));
-  const [events, setEvents] = useState<ProfessionalEvent[]>(() => safeStorage.getJSON<ProfessionalEvent[]>('oc_events', []));
-  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(() => safeStorage.getJSON<CommunityPost[]>('oc_posts', []));
-  const [applications, setApplications] = useState<JobApplication[]>(() => safeStorage.getJSON<JobApplication[]>('oc_applications', []));
-  const [appointments, setAppointments] = useState<Appointment[]>(() => safeStorage.getJSON<Appointment[]>('oc_appointments', []));
-  const [notifications, setNotifications] = useState<Notification[]>(() => {
-    const rawLogged = safeStorage.getItem('oc_logged');
-    if (rawLogged) {
-      return safeStorage.getJSON<Notification[]>(`oc_notif_${rawLogged.trim().toLowerCase()}`, []);
-    }
-    return [];
-  });
-  const [messages, setMessages] = useState<Record<string, Message[]>>(() => safeStorage.getJSON<Record<string, Message[]>>('oc_msgs', {}));
-  const [searchHistory, setSearchHistory] = useState<JobSearchHistory[]>(() => {
-    const rawLogged = safeStorage.getItem('oc_logged');
-    if (rawLogged) {
-      return safeStorage.getJSON<JobSearchHistory[]>(`oc_search_${rawLogged.trim().toLowerCase()}`, []);
-    }
-    return [];
-  });
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [users, setUsers] = useState<Record<string, User>>({});
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [events, setEvents] = useState<ProfessionalEvent[]>([]);
+  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>([]);
+  const [applications, setApplications] = useState<JobApplication[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [messages, setMessages] = useState<Record<string, Message[]>>({});
+  const [searchHistory, setSearchHistory] = useState<JobSearchHistory[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Background Supabase authentication listener and profile sync
   useEffect(() => {
-    let isMounted = true;
+    // Remove any legacy fake seed accounts from localStorage if present
+    const fakeSeedEmails = ['employee@corporate.com', 'employer@corporate.com', 'owner@corporate.com'];
+    fakeSeedEmails.forEach(email => {
+      localStorage.removeItem(`oc_u_${email}`);
+    });
 
+    // Load users
+    const loadedUsers: Record<string, User> = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('oc_u_')) {
+        try {
+          const u = JSON.parse(localStorage.getItem(key) || '');
+          if (u && u.email && !fakeSeedEmails.includes(u.email.trim().toLowerCase())) {
+            const e = u.email.trim().toLowerCase();
+            if (e !== 'adrielaturinda4@gmail.com') {
+              u.isAdmin = false;
+            }
+            loadedUsers[e] = u;
+          }
+        } catch (e) {}
+      }
+    }
+
+    // Ensure Admin Account adrielaturinda4@gmail.com is present with requested credentials and permissions
+    const adminEmail = 'adrielaturinda4@gmail.com';
+    const existingAdmin = loadedUsers[adminEmail];
+    const adminUser: User = {
+      ...(existingAdmin || {}),
+      email: adminEmail,
+      password: 'adrielissocool1',
+      isAdmin: true,
+      isVerified: true,
+      name: existingAdmin?.name || 'Adriel Aturinda',
+      bizName: existingAdmin?.bizName || 'Online Corporate Administration',
+      role: existingAdmin?.role || 'BusinessOwner',
+      country: existingAdmin?.country || 'Uganda',
+      description: existingAdmin?.description || 'Platform Administrator & Founder'
+    };
+    loadedUsers[adminEmail] = adminUser;
+    localStorage.setItem(`oc_u_${adminEmail}`, JSON.stringify(adminUser));
+
+    setUsers(loadedUsers);
+
+    // Load current user
+    const loggedEmail = localStorage.getItem('oc_logged')?.trim().toLowerCase();
+    if (loggedEmail && loadedUsers[loggedEmail]) {
+      setCurrentUser(loadedUsers[loggedEmail]);
+    }
+
+    // Check active Supabase session & listen for Google OAuth logins
     const syncSupabaseAuthUser = (user: any) => {
-      if (!user?.email || !isMounted) return;
+      if (!user?.email) return;
       const supEmail = user.email.trim().toLowerCase();
       const meta = user.user_metadata || {};
       
-      setUsers(prev => {
-        const existing = prev[supEmail];
-        const syncedUser: User = {
-          email: supEmail,
-          name: meta.full_name || meta.name || existing?.name || '',
-          bizName: meta.bizName || existing?.bizName || '',
-          role: (meta.role as any) || existing?.role || 'Employee',
-          occupation: meta.occupation || existing?.occupation || '',
-          speciality: meta.speciality || existing?.speciality || '',
-          location: meta.location || existing?.location || '',
-          description: meta.description || existing?.description || '',
-          photo: meta.avatar_url || meta.picture || existing?.photo || '',
-          isVerified: existing ? Boolean(existing.isVerified) : false,
-          documentsAuthorized: existing ? Boolean(existing.documentsAuthorized || existing.isVerified) : false,
-          trustedBadge: existing ? Boolean(existing.trustedBadge || existing.isVerified) : false,
-          isAdmin: supEmail === ADMIN_EMAIL,
-          ...existing,
-        };
+      const existing = loadedUsers[supEmail];
+      const syncedUser: User = {
+        email: supEmail,
+        name: meta.full_name || meta.name || existing?.name || '',
+        bizName: meta.bizName || existing?.bizName || '',
+        role: (meta.role as any) || existing?.role || 'Employee',
+        occupation: meta.occupation || existing?.occupation || '',
+        speciality: meta.speciality || existing?.speciality || '',
+        location: meta.location || existing?.location || '',
+        description: meta.description || existing?.description || '',
+        photo: meta.avatar_url || meta.picture || existing?.photo || '',
+        isVerified: existing ? existing.isVerified : true,
+        isAdmin: supEmail === 'adrielaturinda4@gmail.com',
+        ...existing,
+      };
 
-        safeStorage.setJSON(`oc_u_${supEmail}`, syncedUser);
-        safeStorage.setItem('oc_logged', supEmail);
-        setCurrentUser(syncedUser);
+      loadedUsers[supEmail] = syncedUser;
+      setUsers(prev => ({ ...prev, [supEmail]: syncedUser }));
+      localStorage.setItem(`oc_u_${supEmail}`, JSON.stringify(syncedUser));
+      setCurrentUser(syncedUser);
+      localStorage.setItem('oc_logged', supEmail);
 
-        // Persist to public profiles in Supabase
-        upsertProfileToSupabase(syncedUser).catch(() => {});
-
-        return { ...prev, [supEmail]: syncedUser };
-      });
+      // Persist to public profiles in Supabase
+      upsertProfileToSupabase(syncedUser).catch(() => {});
     };
 
-    // Check active session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user?.email && isMounted) {
+      if (session?.user?.email) {
         syncSupabaseAuthUser(session.user);
       }
     }).catch(() => {});
 
-    // Listen for auth state changes
     const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user?.email && isMounted) {
+      if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user?.email) {
         syncSupabaseAuthUser(session.user);
-        try {
-          if (typeof window !== 'undefined' && window.location.hash.includes('access_token')) {
-            window.history.replaceState({}, document.title, window.location.pathname);
-          }
-        } catch (e) {}
+        if (typeof window !== 'undefined' && window.location.hash.includes('access_token')) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
       }
     });
 
-    // Check if the current window URL has OAuth hash parameters directly (e.g. redirected directly)
-    if (typeof window !== 'undefined' && window.location.hash) {
-      try {
-        const hash = window.location.hash.replace(/^#/, '');
-        if (hash.includes('access_token=')) {
-          const params = new URLSearchParams(hash);
-          const access_token = params.get('access_token');
-          const refresh_token = params.get('refresh_token');
-          if (access_token && refresh_token) {
-            supabase.auth.setSession({ access_token, refresh_token }).then(({ data }) => {
-              if (data?.session?.user && isMounted) {
-                syncSupabaseAuthUser(data.session.user);
-              }
-            }).catch(() => {});
-          }
-        }
-      } catch (e) {}
-    }
-
-    // Popup OAuth listener for Google Sign In
-    const handleOAuthMessage = async (event: MessageEvent) => {
-      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        const hash = event.data.hash || '';
-        const search = event.data.search || '';
-
-        try {
-          if (hash) {
-            const cleanHash = hash.replace(/^#/, '');
-            const params = new URLSearchParams(cleanHash);
-            const access_token = params.get('access_token');
-            const refresh_token = params.get('refresh_token');
-
-            if (access_token && refresh_token) {
-              const { data: sessionData } = await supabase.auth.setSession({
-                access_token,
-                refresh_token,
-              });
-              if (sessionData?.session?.user && isMounted) {
-                syncSupabaseAuthUser(sessionData.session.user);
-                return;
-              }
-            }
-          }
-
-          if (search) {
-            const cleanSearch = search.replace(/^\?/, '');
-            const params = new URLSearchParams(cleanSearch);
-            const code = params.get('code');
-            if (code) {
-              const { data: sessionData } = await supabase.auth.exchangeCodeForSession(code);
-              if (sessionData?.session?.user && isMounted) {
-                syncSupabaseAuthUser(sessionData.session.user);
-                return;
-              }
-            }
-          }
-
-          // Fallback: check session from client
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user && isMounted) {
-            syncSupabaseAuthUser(session.user);
-          }
-        } catch (err) {
-          console.warn('Failed to process OAuth tokens from popup:', err);
-        }
-      }
-    };
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener('message', handleOAuthMessage);
-    }
-
-    // Fetch all registered user profiles from Supabase database in background
+    // Fetch all registered user profiles from Supabase database
     fetchProfilesFromSupabase().then(remoteProfiles => {
-      if (remoteProfiles && Array.isArray(remoteProfiles) && remoteProfiles.length > 0 && isMounted) {
+      if (remoteProfiles && remoteProfiles.length > 0) {
         setUsers(prev => {
           const merged = { ...prev };
           remoteProfiles.forEach(p => {
-            if (p && typeof p.email === 'string') {
-              const e = p.email.trim().toLowerCase();
-              merged[e] = { ...(merged[e] || {}), ...p };
-              safeStorage.setJSON(`oc_u_${e}`, merged[e]);
-            }
+            const e = p.email.trim().toLowerCase();
+            merged[e] = { ...(merged[e] || {}), ...p };
+            localStorage.setItem(`oc_u_${e}`, JSON.stringify(merged[e]));
           });
           return merged;
         });
       }
     }).catch(() => {});
 
-    return () => {
-      isMounted = false;
-      try {
-        authSub?.subscription?.unsubscribe();
-      } catch (e) {}
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('message', handleOAuthMessage);
+    // Load other data
+    try {
+      setAnnouncements(JSON.parse(localStorage.getItem('oc_ann') || '[]'));
+      setJobs(JSON.parse(localStorage.getItem('oc_jobs') || '[]'));
+      setEvents(JSON.parse(localStorage.getItem('oc_events') || '[]'));
+      setCommunityPosts(JSON.parse(localStorage.getItem('oc_posts') || '[]'));
+      setApplications(JSON.parse(localStorage.getItem('oc_applications') || '[]'));
+      setAppointments(JSON.parse(localStorage.getItem('oc_appointments') || '[]'));
+      
+      if (loggedEmail) {
+        setNotifications(JSON.parse(localStorage.getItem(`oc_notif_${loggedEmail}`) || '[]'));
+        setSearchHistory(JSON.parse(localStorage.getItem(`oc_search_${loggedEmail}`) || '[]'));
       }
-    };
+      setMessages(JSON.parse(localStorage.getItem('oc_msgs') || '{}'));
+    } catch (e) {}
+
+    setIsLoading(false);
   }, []);
 
   // Synchronize and subscribe to messages in real-time via Supabase
   useEffect(() => {
     if (!currentUser?.email) return;
     const myEmail = currentUser.email.trim().toLowerCase();
-    let isMounted = true;
 
     // Fetch existing messages from Supabase
     const syncRemoteMessages = async () => {
       try {
         const remoteMsgs = await fetchMessagesFromSupabase(myEmail);
-        if (remoteMsgs && Object.keys(remoteMsgs).length > 0 && isMounted) {
+        if (remoteMsgs && Object.keys(remoteMsgs).length > 0) {
           setMessages(prev => {
             const merged = { ...prev };
             for (const [key, msgList] of Object.entries(remoteMsgs)) {
@@ -289,7 +184,7 @@ export function useAppStorage() {
               combined.sort((a, b) => a.time - b.time);
               merged[key] = combined;
             }
-            safeStorage.setJSON('oc_msgs', merged);
+            localStorage.setItem('oc_msgs', JSON.stringify(merged));
             return merged;
           });
         }
@@ -299,49 +194,48 @@ export function useAppStorage() {
     syncRemoteMessages();
 
     // Realtime channel for instant message receipt
-    const unsubscribe = subscribeToMessages(myEmail, (incoming) => {
-      if (!isMounted) return;
-      const cleanFrom = incoming.sender_email.trim().toLowerCase();
-      const cleanTo = incoming.receiver_email.trim().toLowerCase();
-      const key = [cleanFrom, cleanTo].sort().join('::');
-
+    const unsubscribe = subscribeToMessages(myEmail, (record) => {
+      const sender = (record.sender_email || '').trim().toLowerCase();
+      const receiver = (record.receiver_email || '').trim().toLowerCase();
+      const key = [sender, receiver].sort().join('::');
       const newMsg: Message = {
-        from: cleanFrom,
-        text: incoming.text,
-        time: incoming.created_at ? new Date(incoming.created_at).getTime() : Date.now(),
-        read: Boolean(incoming.read)
+        from: sender,
+        text: record.text || '',
+        time: record.created_at ? new Date(record.created_at).getTime() : Date.now(),
+        read: Boolean(record.read)
       };
 
       setMessages(prev => {
-        const existing = prev[key] || [];
-        const alreadyHas = existing.some(
+        const currentList = prev[key] || [];
+        const exists = currentList.some(
           m => Math.abs(m.time - newMsg.time) < 2000 && m.text === newMsg.text && m.from === newMsg.from
         );
-        if (alreadyHas) return prev;
-
-        const updatedThread = [...existing, newMsg].sort((a, b) => a.time - b.time);
-        const updated = { ...prev, [key]: updatedThread };
-        safeStorage.setJSON('oc_msgs', updated);
+        if (exists) return prev;
+        const updated = {
+          ...prev,
+          [key]: [...currentList, newMsg]
+        };
+        localStorage.setItem('oc_msgs', JSON.stringify(updated));
         return updated;
       });
 
-      // Show notification if message is from the other party
-      if (cleanFrom !== myEmail) {
+      // Notification for incoming message
+      if (receiver === myEmail && sender !== myEmail) {
+        const senderUser = users[sender];
+        const senderName = senderUser?.bizName || senderUser?.name || sender;
         addNotificationTo(myEmail, {
           type: 'msg',
-          text: `New message from ${cleanFrom}`,
-          sub: incoming.text.slice(0, 50)
+          text: `New message from ${senderName}`,
+          sub: (record.text || '').slice(0, 50)
         });
       }
     });
 
-    const intervalId = setInterval(syncRemoteMessages, 30000);
+    // Fallback sync every 6 seconds to ensure messages never lag
+    const intervalId = setInterval(syncRemoteMessages, 6000);
 
     return () => {
-      isMounted = false;
-      try {
-        unsubscribe();
-      } catch (e) {}
+      unsubscribe();
       clearInterval(intervalId);
     };
   }, [currentUser?.email]);
@@ -349,7 +243,7 @@ export function useAppStorage() {
   const saveUser = (user: User) => {
     const cleanEmail = user.email.trim().toLowerCase();
     const updatedUser = { ...user, email: cleanEmail };
-    safeStorage.setJSON(`oc_u_${cleanEmail}`, updatedUser);
+    localStorage.setItem(`oc_u_${cleanEmail}`, JSON.stringify(updatedUser));
     setUsers(prev => ({ ...prev, [cleanEmail]: updatedUser }));
     if (currentUser?.email.trim().toLowerCase() === cleanEmail) {
       setCurrentUser(updatedUser);
@@ -360,17 +254,17 @@ export function useAppStorage() {
 
   const login = (email: string, user?: User) => {
     const cleanEmail = email.trim().toLowerCase();
-    safeStorage.setItem('oc_logged', cleanEmail);
+    localStorage.setItem('oc_logged', cleanEmail);
     const userToSet = user || users[cleanEmail] || null;
     setCurrentUser(userToSet);
     if (userToSet) {
-      setNotifications(safeStorage.getJSON<Notification[]>(`oc_notif_${cleanEmail}`, []));
-      setSearchHistory(safeStorage.getJSON<JobSearchHistory[]>(`oc_search_${cleanEmail}`, []));
+      setNotifications(JSON.parse(localStorage.getItem(`oc_notif_${cleanEmail}`) || '[]'));
+      setSearchHistory(JSON.parse(localStorage.getItem(`oc_search_${cleanEmail}`) || '[]'));
     }
   };
 
   const logout = () => {
-    safeStorage.removeItem('oc_logged');
+    localStorage.removeItem('oc_logged');
     setCurrentUser(null);
     signOutFromSupabase().catch(() => {});
   };
@@ -399,7 +293,7 @@ export function useAppStorage() {
     };
     const newList = [newApp, ...applications];
     setApplications(newList);
-    safeStorage.setJSON('oc_applications', newList);
+    localStorage.setItem('oc_applications', JSON.stringify(newList));
   };
 
   const updateApplicationStatus = (appId: string, status: ApplicationStatus) => {
@@ -407,7 +301,7 @@ export function useAppStorage() {
       app.id === appId ? { ...app, status, updatedAt: Date.now() } : app
     );
     setApplications(newList);
-    safeStorage.setJSON('oc_applications', newList);
+    localStorage.setItem('oc_applications', JSON.stringify(newList));
     
     const app = applications.find(a => a.id === appId);
     if (app) {
@@ -433,25 +327,25 @@ export function useAppStorage() {
     };
     const newList = [newPost, ...communityPosts];
     setCommunityPosts(newList);
-    safeStorage.setJSON('oc_posts', newList);
+    localStorage.setItem('oc_posts', JSON.stringify(newList));
   };
 
   const likePost = (postId: string) => {
     if (!currentUser) return;
     const newList = communityPosts.map(p => {
       if (p.id === postId) {
-        const liked = (p.likes || []).includes(currentUser.email);
+        const liked = p.likes.includes(currentUser.email);
         return {
           ...p,
           likes: liked 
-            ? (p.likes || []).filter(e => e !== currentUser.email)
-            : [...(p.likes || []), currentUser.email]
+            ? p.likes.filter(e => e !== currentUser.email)
+            : [...p.likes, currentUser.email]
         };
       }
       return p;
     });
     setCommunityPosts(newList);
-    safeStorage.setJSON('oc_posts', newList);
+    localStorage.setItem('oc_posts', JSON.stringify(newList));
   };
 
   const addEvent = (event: Omit<ProfessionalEvent, 'id' | 'hostEmail' | 'hostName' | 'attendees'>) => {
@@ -465,25 +359,25 @@ export function useAppStorage() {
     };
     const newList = [newEvent, ...events];
     setEvents(newList);
-    safeStorage.setJSON('oc_events', newList);
+    localStorage.setItem('oc_events', JSON.stringify(newList));
   };
 
   const joinEvent = (eventId: string) => {
     if (!currentUser) return;
     const newList = events.map(e => {
       if (e.id === eventId) {
-        const attending = (e.attendees || []).includes(currentUser.email);
+        const attending = e.attendees.includes(currentUser.email);
         return {
           ...e,
           attendees: attending 
-            ? (e.attendees || []).filter(a => a !== currentUser.email)
-            : [...(e.attendees || []), currentUser.email]
+            ? e.attendees.filter(a => a !== currentUser.email)
+            : [...e.attendees, currentUser.email]
         };
       }
       return e;
     });
     setEvents(newList);
-    safeStorage.setJSON('oc_events', newList);
+    localStorage.setItem('oc_events', JSON.stringify(newList));
   };
 
   const addNotificationTo = (email: string, notif: Omit<Notification, 'id' | 'time' | 'read'>) => {
@@ -495,9 +389,13 @@ export function useAppStorage() {
       read: false
     };
     
-    const list = safeStorage.getJSON<Notification[]>(key, []);
+    let list: Notification[] = [];
+    try {
+      list = JSON.parse(localStorage.getItem(key) || '[]');
+    } catch (e) {}
+    
     const newList = [newNotif, ...list].slice(0, 50);
-    safeStorage.setJSON(key, newList);
+    localStorage.setItem(key, JSON.stringify(newList));
     
     if (currentUser?.email === email) {
       setNotifications(newList);
@@ -519,7 +417,7 @@ export function useAppStorage() {
     const newMsgs = { ...messages };
     newMsgs[key] = [...(newMsgs[key] || []), newMsg];
     setMessages(newMsgs);
-    safeStorage.setJSON('oc_msgs', newMsgs);
+    localStorage.setItem('oc_msgs', JSON.stringify(newMsgs));
 
     // Persist to Supabase database
     sendMessageToSupabase(cleanFrom, cleanTo, text.trim()).catch(() => {});
@@ -533,24 +431,19 @@ export function useAppStorage() {
   };
 
   const markThreadAsRead = (otherEmail: string) => {
-    if (!currentUser || !otherEmail) return;
+    if (!currentUser) return;
     const cleanMy = currentUser.email.trim().toLowerCase();
     const cleanOther = otherEmail.trim().toLowerCase();
     const key = [cleanMy, cleanOther].sort().join('::');
     if (!messages[key]) return;
     
-    const hasUnread = (messages[key] || []).some(
-      m => (m.from || '').trim().toLowerCase() !== cleanMy && !m.read
-    );
-    if (!hasUnread) return;
-
-    const updatedThread = (messages[key] || []).map(m => 
-      (m.from || '').trim().toLowerCase() !== cleanMy ? { ...m, read: true } : m
+    const updatedThread = messages[key].map(m => 
+      m.from !== cleanMy ? { ...m, read: true } : m
     );
     
     const newMsgs = { ...messages, [key]: updatedThread };
     setMessages(newMsgs);
-    safeStorage.setJSON('oc_msgs', newMsgs);
+    localStorage.setItem('oc_msgs', JSON.stringify(newMsgs));
 
     // Sync read state with Supabase
     markMessagesAsReadInSupabase(cleanMy, cleanOther).catch(() => {});
@@ -560,7 +453,7 @@ export function useAppStorage() {
     if (!currentUser) return;
     const updated = notifications.map(n => ({ ...n, read: true }));
     setNotifications(updated);
-    safeStorage.setJSON(`oc_notif_${currentUser.email}`, updated);
+    localStorage.setItem(`oc_notif_${currentUser.email}`, JSON.stringify(updated));
   };
 
   const saveJobSearch = (type: string, location: string) => {
@@ -580,19 +473,19 @@ export function useAppStorage() {
 
     const newList = [newSearch, ...searchHistory].slice(0, 10);
     setSearchHistory(newList);
-    safeStorage.setJSON(key, newList);
+    localStorage.setItem(key, JSON.stringify(newList));
   };
 
   const clearSearchHistory = () => {
     if (!currentUser) return;
     const key = `oc_search_${currentUser.email}`;
     setSearchHistory([]);
-    safeStorage.removeItem(key);
+    localStorage.removeItem(key);
   };
 
   const deleteUser = (email: string) => {
     const cleanEmail = email.trim().toLowerCase();
-    safeStorage.removeItem(`oc_u_${cleanEmail}`);
+    localStorage.removeItem(`oc_u_${cleanEmail}`);
     setUsers(prev => {
       const copy = { ...prev };
       delete copy[cleanEmail];
@@ -611,24 +504,22 @@ export function useAppStorage() {
     const updated: User = {
       ...targetUser,
       isVerified,
-      documentsAuthorized: isVerified,
-      trustedBadge: isVerified,
       verificationPending: false,
-      verificationReason: reason || (isVerified ? 'Documents Authorized by Platform Administrator' : 'Verification declined by Administrator')
+      verificationReason: reason || (isVerified ? 'Approved by Platform Administrator' : 'Verification declined by Administrator')
     };
 
     saveUser(updated);
 
     addNotificationTo(cleanEmail, {
       type: 'account',
-      text: isVerified ? 'Documents Authorized! Trusted Badge Awarded' : 'Document Status Updated',
-      sub: reason || (isVerified ? 'Your submitted documents have been officially authorized. The Trusted Badge is now active on your profile.' : 'Your verification request was reviewed.')
+      text: isVerified ? 'Identity Verified! Badge Granted' : 'Verification Status Updated',
+      sub: reason || (isVerified ? 'An administrator has verified your national identity document.' : 'Your verification request was reviewed.')
     });
   };
 
   const toggleUserAdmin = (email: string, _isAdmin: boolean) => {
     const cleanEmail = email.trim().toLowerCase();
-    if (cleanEmail !== ADMIN_EMAIL) {
+    if (cleanEmail !== 'adrielaturinda4@gmail.com') {
       return;
     }
     const targetUser = users[cleanEmail];
@@ -645,25 +536,25 @@ export function useAppStorage() {
   const deleteJob = (jobId: number) => {
     const updated = jobs.filter(j => j.id !== jobId);
     setJobs(updated);
-    safeStorage.setJSON('oc_jobs', updated);
+    localStorage.setItem('oc_jobs', JSON.stringify(updated));
   };
 
   const deleteAnnouncement = (annId: number) => {
     const updated = announcements.filter(a => a.id !== annId);
     setAnnouncements(updated);
-    safeStorage.setJSON('oc_ann', updated);
+    localStorage.setItem('oc_ann', JSON.stringify(updated));
   };
 
   const deleteCommunityPost = (postId: string) => {
     const updated = communityPosts.filter(p => p.id !== postId);
     setCommunityPosts(updated);
-    safeStorage.setJSON('oc_posts', updated);
+    localStorage.setItem('oc_posts', JSON.stringify(updated));
   };
 
   const deleteEvent = (eventId: string) => {
     const updated = events.filter(e => e.id !== eventId);
     setEvents(updated);
-    safeStorage.setJSON('oc_events', updated);
+    localStorage.setItem('oc_events', JSON.stringify(updated));
   };
 
   const broadcastNotification = (title: string, message: string) => {
@@ -701,7 +592,7 @@ export function useAppStorage() {
     };
     const newList = [newAppt, ...appointments];
     setAppointments(newList);
-    safeStorage.setJSON('oc_appointments', newList);
+    localStorage.setItem('oc_appointments', JSON.stringify(newList));
 
     // Send notification to host
     addNotificationTo(data.hostEmail, {
@@ -724,7 +615,7 @@ export function useAppStorage() {
       a.id === appointmentId ? { ...a, status: 'Cancelled' as const } : a
     );
     setAppointments(newList);
-    safeStorage.setJSON('oc_appointments', newList);
+    localStorage.setItem('oc_appointments', JSON.stringify(newList));
   };
 
   return {

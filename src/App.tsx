@@ -64,7 +64,13 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppStorage } from './useAppStorage';
 import { User, Job, Announcement, Notification, UserRole, PortfolioItem, CommunityPost, ProfessionalEvent, Appointment } from './types';
-import { signUpWithSupabase, signInWithSupabase, signInWithGoogle } from './lib/supabase';
+import { 
+  signUpWithSupabase, 
+  signInWithSupabase, 
+  signInWithGoogle,
+  resetPasswordForEmail,
+  updateUserPassword
+} from './lib/supabase';
 
 // --- Sub-components (Simplified for now, can be extracted later) ---
 
@@ -120,13 +126,28 @@ export default function App() {
     deleteAnnouncement,
     deleteCommunityPost,
     deleteEvent,
-    broadcastNotification
+    broadcastNotification,
+    isPasswordRecovery,
+    setIsPasswordRecovery
   } = useAppStorage();
 
   const [activePage, setActivePage] = useState<'home' | 'jobs' | 'messages' | 'notifications' | 'card' | 'discover' | 'community' | 'events' | 'applications' | 'about' | 'admin'>('about');
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Password Reset & Recovery State
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotMsg, setForgotMsg] = useState('');
+  const [forgotError, setForgotError] = useState('');
+
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryError, setRecoveryError] = useState('');
+  const [recoverySuccess, setRecoverySuccess] = useState('');
 
   // Auto-scroll chat to latest message
   useEffect(() => {
@@ -375,6 +396,52 @@ export default function App() {
     } catch (err: any) {
       setAuthError(err?.message || 'Failed to initialize Google Sign In');
       setIsGoogleLoading(false);
+    }
+  };
+
+  const handleSendPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError('');
+    setForgotMsg('');
+    const clean = forgotEmail.trim().toLowerCase();
+    if (!clean || !clean.includes('@')) {
+      setForgotError('Please enter a valid email address.');
+      return;
+    }
+    setForgotLoading(true);
+    const res = await resetPasswordForEmail(clean);
+    setForgotLoading(false);
+    if (res.success) {
+      setForgotMsg('Password reset link sent! Check your inbox or spam folder.');
+    } else {
+      setForgotError(res.error || 'Failed to send password reset link.');
+    }
+  };
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRecoveryError('');
+    setRecoverySuccess('');
+    if (newPassword.length < 6) {
+      setRecoveryError('Password must be at least 6 characters long.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setRecoveryError('Passwords do not match.');
+      return;
+    }
+    setRecoveryLoading(true);
+    const res = await updateUserPassword(newPassword);
+    setRecoveryLoading(false);
+    if (res.success) {
+      setRecoverySuccess('Password successfully updated! You can now continue.');
+      setTimeout(() => {
+        setIsPasswordRecovery(false);
+        setNewPassword('');
+        setConfirmNewPassword('');
+      }, 2000);
+    } else {
+      setRecoveryError(res.error || 'Failed to update password.');
     }
   };
 
@@ -840,9 +907,25 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                  Password
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    Password
+                  </label>
+                  {authMode === 'login' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForgotEmail(email || '');
+                        setForgotError('');
+                        setForgotMsg('');
+                        setShowForgotModal(true);
+                      }}
+                      className="text-[11px] font-semibold text-oc-gold hover:underline cursor-pointer"
+                    >
+                      Forgot Password?
+                    </button>
+                  )}
+                </div>
                 <div className="relative">
                   <Lock className="absolute left-3.5 top-3.5 text-gray-400 w-4 h-4" />
                   <input 
@@ -957,6 +1040,184 @@ export default function App() {
         <div className="text-center text-[11px] text-gray-500 py-2">
           &copy; 2026 Online Corporate • Synchronized with Supabase Authentication
         </div>
+
+        {/* Forgot Password Modal */}
+        <AnimatePresence>
+          {showForgotModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white dark:bg-oc-navy p-6 rounded-3xl shadow-2xl w-full max-w-sm border border-oc-gold/20"
+              >
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-serif font-bold text-lg text-oc-navy dark:text-oc-gold">Reset Password</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotModal(false)}
+                    className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-white"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                  Enter your registered email address and we will send a password reset link to your inbox.
+                </p>
+
+                {forgotError && (
+                  <div className="mb-3 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs flex items-center gap-2">
+                    <AlertCircle size={14} className="shrink-0" />
+                    <span>{forgotError}</span>
+                  </div>
+                )}
+
+                {forgotMsg && (
+                  <div className="mb-3 p-2.5 rounded-xl bg-green-500/10 border border-green-500/30 text-green-600 dark:text-green-400 text-xs flex items-center gap-2">
+                    <CheckCircle size={14} className="shrink-0" />
+                    <span>{forgotMsg}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleSendPasswordReset} className="space-y-4">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                      Email Address
+                    </label>
+                    <div className="relative">
+                      <Mail className="absolute left-3.5 top-3.5 text-gray-400 w-4 h-4" />
+                      <input
+                        type="email"
+                        required
+                        disabled={forgotLoading}
+                        placeholder="e.g. user@example.com"
+                        value={forgotEmail}
+                        onChange={e => { setForgotEmail(e.target.value); setForgotError(''); }}
+                        className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotModal(false)}
+                      className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-white/10 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="flex-1 py-2.5 rounded-xl bg-oc-navy text-oc-gold font-bold text-xs hover:bg-oc-navy-mid flex items-center justify-center gap-2 disabled:opacity-60"
+                    >
+                      {forgotLoading ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          <span>Sending...</span>
+                        </>
+                      ) : (
+                        <span>Send Reset Link</span>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Password Recovery Modal */}
+        <AnimatePresence>
+          {isPasswordRecovery && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white dark:bg-oc-navy p-6 rounded-3xl shadow-2xl w-full max-w-sm border border-oc-gold/20"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Lock className="text-oc-gold w-5 h-5" />
+                  <h3 className="font-serif font-bold text-lg text-oc-navy dark:text-oc-gold">Set New Password</h3>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                  Please enter your new password to complete your account recovery.
+                </p>
+
+                {recoveryError && (
+                  <div className="mb-3 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs flex items-center gap-2">
+                    <AlertCircle size={14} className="shrink-0" />
+                    <span>{recoveryError}</span>
+                  </div>
+                )}
+
+                {recoverySuccess && (
+                  <div className="mb-3 p-2.5 rounded-xl bg-green-500/10 border border-green-500/30 text-green-600 dark:text-green-400 text-xs flex items-center gap-2">
+                    <CheckCircle size={14} className="shrink-0" />
+                    <span>{recoverySuccess}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleUpdatePassword} className="space-y-4">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                      New Password (min 6 characters)
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      disabled={recoveryLoading}
+                      placeholder="Enter new password"
+                      value={newPassword}
+                      onChange={e => { setNewPassword(e.target.value); setRecoveryError(''); }}
+                      className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                      Confirm New Password
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      disabled={recoveryLoading}
+                      placeholder="Re-enter new password"
+                      value={confirmNewPassword}
+                      onChange={e => { setConfirmNewPassword(e.target.value); setRecoveryError(''); }}
+                      className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 focus:border-oc-gold rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-oc-gold/20 outline-none"
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsPasswordRecovery(false)}
+                      className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-white/10 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5"
+                    >
+                      Dismiss
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={recoveryLoading}
+                      className="flex-1 py-2.5 rounded-xl bg-oc-navy text-oc-gold font-bold text-xs hover:bg-oc-navy-mid flex items-center justify-center gap-2 disabled:opacity-60"
+                    >
+                      {recoveryLoading ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          <span>Updating...</span>
+                        </>
+                      ) : (
+                        <span>Save Password</span>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
 
         {/* Role Selector Modal Overlay if in setup */}
         <AnimatePresence>

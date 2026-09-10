@@ -181,6 +181,42 @@ export async function signOutFromSupabase(): Promise<{ success: boolean; error?:
 }
 
 /**
+ * Send password reset email via Supabase Auth
+ */
+export async function resetPasswordForEmail(email: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const cleanEmail = email.trim().toLowerCase();
+    const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}` : '';
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+      redirectTo: redirectUrl,
+    });
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to send password reset request' };
+  }
+}
+
+/**
+ * Update authenticated user's password in Supabase Auth
+ */
+export async function updateUserPassword(newPassword: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to update password' };
+  }
+}
+
+/**
  * Fetch all registered user profiles from the Supabase public.profiles table
  */
 export async function fetchProfilesFromSupabase(): Promise<User[]> {
@@ -358,6 +394,27 @@ export async function markMessagesAsReadInSupabase(myEmail: string, otherEmail: 
         read: false
       });
   } catch (_) {}
+}
+
+/**
+ * Delete a conversation between two users in Supabase
+ */
+export async function deleteConversationFromSupabase(myEmail: string, otherEmailOrKey: string): Promise<boolean> {
+  try {
+    const cleanMy = myEmail.trim().toLowerCase();
+    const cleanTarget = otherEmailOrKey.trim().toLowerCase();
+    const key = [cleanMy, cleanTarget].sort().join('::');
+    
+    await supabase
+      .from('messages')
+      .delete()
+      .or(`conversation_key.eq.${key},conversation_key.eq.${cleanTarget},and(sender_email.eq.${cleanMy},receiver_email.eq.${cleanTarget}),and(sender_email.eq.${cleanTarget},receiver_email.eq.${cleanMy})`);
+      
+    return true;
+  } catch (err) {
+    console.warn('Could not delete conversation from Supabase:', err);
+    return false;
+  }
 }
 
 /**

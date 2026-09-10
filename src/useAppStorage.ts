@@ -25,6 +25,7 @@ export function useAppStorage() {
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [searchHistory, setSearchHistory] = useState<JobSearchHistory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   useEffect(() => {
     // Remove any legacy fake seed accounts from localStorage if present
@@ -121,6 +122,11 @@ export function useAppStorage() {
         if (typeof window !== 'undefined' && window.location.hash.includes('access_token')) {
           window.history.replaceState({}, document.title, window.location.pathname);
         }
+      } else if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(true);
+      } else if (event === 'SIGNED_OUT') {
+        localStorage.removeItem('oc_logged');
+        setCurrentUser(null);
       }
     });
 
@@ -151,8 +157,10 @@ export function useAppStorage() {
       if (loggedEmail) {
         setNotifications(JSON.parse(localStorage.getItem(`oc_notif_${loggedEmail}`) || '[]'));
         setSearchHistory(JSON.parse(localStorage.getItem(`oc_search_${loggedEmail}`) || '[]'));
+        setMessages(JSON.parse(localStorage.getItem(`oc_msgs_${loggedEmail}`) || '{}'));
+      } else {
+        setMessages({});
       }
-      setMessages(JSON.parse(localStorage.getItem('oc_msgs') || '{}'));
     } catch (e) {}
 
     setIsLoading(false);
@@ -184,7 +192,7 @@ export function useAppStorage() {
               combined.sort((a, b) => a.time - b.time);
               merged[key] = combined;
             }
-            localStorage.setItem('oc_msgs', JSON.stringify(merged));
+            localStorage.setItem(`oc_msgs_${myEmail}`, JSON.stringify(merged));
             return merged;
           });
         }
@@ -215,7 +223,7 @@ export function useAppStorage() {
           ...prev,
           [key]: [...currentList, newMsg]
         };
-        localStorage.setItem('oc_msgs', JSON.stringify(updated));
+        localStorage.setItem(`oc_msgs_${myEmail}`, JSON.stringify(updated));
         return updated;
       });
 
@@ -260,12 +268,16 @@ export function useAppStorage() {
     if (userToSet) {
       setNotifications(JSON.parse(localStorage.getItem(`oc_notif_${cleanEmail}`) || '[]'));
       setSearchHistory(JSON.parse(localStorage.getItem(`oc_search_${cleanEmail}`) || '[]'));
+      setMessages(JSON.parse(localStorage.getItem(`oc_msgs_${cleanEmail}`) || '{}'));
     }
   };
 
   const logout = () => {
     localStorage.removeItem('oc_logged');
     setCurrentUser(null);
+    setMessages({});
+    setNotifications([]);
+    setSearchHistory([]);
     signOutFromSupabase().catch(() => {});
   };
 
@@ -417,7 +429,7 @@ export function useAppStorage() {
     const newMsgs = { ...messages };
     newMsgs[key] = [...(newMsgs[key] || []), newMsg];
     setMessages(newMsgs);
-    localStorage.setItem('oc_msgs', JSON.stringify(newMsgs));
+    localStorage.setItem(`oc_msgs_${cleanFrom}`, JSON.stringify(newMsgs));
 
     // Persist to Supabase database
     sendMessageToSupabase(cleanFrom, cleanTo, text.trim()).catch(() => {});
@@ -443,7 +455,7 @@ export function useAppStorage() {
     
     const newMsgs = { ...messages, [key]: updatedThread };
     setMessages(newMsgs);
-    localStorage.setItem('oc_msgs', JSON.stringify(newMsgs));
+    localStorage.setItem(`oc_msgs_${cleanMy}`, JSON.stringify(newMsgs));
 
     // Sync read state with Supabase
     markMessagesAsReadInSupabase(cleanMy, cleanOther).catch(() => {});
@@ -631,6 +643,8 @@ export function useAppStorage() {
     applications,
     appointments,
     isLoading,
+    isPasswordRecovery,
+    setIsPasswordRecovery,
     saveUser,
     login,
     logout,

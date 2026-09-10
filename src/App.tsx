@@ -15,6 +15,8 @@ import {
   X,
   ChevronDown,
   Check,
+  Copy,
+  RefreshCw,
   Sun,
   Moon,
   Plus,
@@ -177,6 +179,7 @@ export default function App() {
   const [authSuccessMsg, setAuthSuccessMsg] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [setupError, setSetupError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [roleSelection, setRoleSelection] = useState<UserRole | null>(null);
   
@@ -621,6 +624,7 @@ export default function App() {
     const tempPassword = localStorage.getItem('oc_temp_pwd') || password || '123456';
     if (!tempEmail) return;
     
+    setSetupError('');
     setIsAuthLoading(true);
     
     const role = roleSelection || 'Employee';
@@ -637,11 +641,33 @@ export default function App() {
     };
 
     // Register user in Supabase Auth (Visible in Supabase Dashboard -> Authentication -> Users)
-    let supRes;
+    let supRes: any;
     try {
       supRes = await signUpWithSupabase(tempEmail, tempPassword, profileMeta);
-    } catch (e) {
+    } catch (e: any) {
       console.warn('Supabase registration exception:', e);
+      supRes = { success: false, error: e?.message || 'Failed to communicate with Supabase' };
+    }
+
+    if (supRes && !supRes.success && supRes.error) {
+      const errLower = supRes.error.toLowerCase();
+      if (errLower.includes('already registered') || errLower.includes('already in use') || errLower.includes('already exists')) {
+        setSetupError('This email is already registered in Supabase. Please close this modal and use "Sign In" with your password.');
+        setIsAuthLoading(false);
+        return;
+      } else if (errLower.includes('password')) {
+        setSetupError(`Password error: ${supRes.error}`);
+        setIsAuthLoading(false);
+        return;
+      } else if (errLower.includes('rate limit')) {
+        setSetupError('Supabase email rate limit reached. Please wait a moment or disable "Confirm email" in Supabase Dashboard -> Authentication -> Providers -> Email.');
+        setIsAuthLoading(false);
+        return;
+      } else if (errLower.includes('signup disabled') || errLower.includes('not allowed')) {
+        setSetupError('Signups are disabled in your Supabase Auth settings. Go to Supabase Dashboard -> Authentication -> Providers -> Email and ensure "Enable Email provider" is turned ON.');
+        setIsAuthLoading(false);
+        return;
+      }
     }
 
     const existing = users[tempEmail] || {};
@@ -968,17 +994,17 @@ export default function App() {
               )}
 
               <button 
-                type="submit"
+                type="submit" 
                 disabled={isAuthLoading}
-                className="w-full bg-oc-navy hover:bg-oc-navy-mid text-oc-gold font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-oc-navy/20 flex items-center justify-center gap-2 mt-2 disabled:opacity-70"
+                className="w-full bg-oc-navy hover:bg-oc-navy-mid text-oc-gold font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-oc-navy/20 flex items-center justify-center gap-2 mt-2 disabled:opacity-70 cursor-pointer"
               >
                 {isAuthLoading ? (
                   <>
                     <Loader2 size={18} className="animate-spin text-oc-gold" />
-                    <span>{authMode === 'login' ? 'Authenticating with Supabase...' : 'Connecting to Supabase...'}</span>
+                    <span>{authMode === 'login' ? 'Signing In...' : 'Creating Account...'}</span>
                   </>
                 ) : (
-                  <span>{authMode === 'login' ? 'Sign In with Email' : 'Continue to Role Selection'}</span>
+                  <span>{authMode === 'login' ? 'Sign In' : 'Continue'}</span>
                 )}
               </button>
             </form>
@@ -1037,8 +1063,8 @@ export default function App() {
         </div>
 
         {/* Footer info */}
-        <div className="text-center text-[11px] text-gray-500 py-2">
-          &copy; 2026 Online Corporate • Synchronized with Supabase Authentication
+        <div className="text-center text-[11px] text-gray-400 py-3">
+          &copy; 2026 Online Corporate. All rights reserved.
         </div>
 
         {/* Forgot Password Modal */}
@@ -1259,8 +1285,25 @@ export default function App() {
                 initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
                 className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/20 max-h-[90vh] overflow-y-auto"
               >
-                <h2 className="text-2xl font-serif font-bold text-oc-navy dark:text-oc-gold-light mb-2">Setup Your Profile</h2>
-                <p className="text-xs text-gray-400 mb-6">Create your account & sync to Supabase</p>
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-2xl font-serif font-bold text-oc-navy dark:text-oc-gold-light">Setup Your Profile</h2>
+                  <button 
+                    type="button" 
+                    onClick={() => { setShowSetupModal(false); setSetupError(''); }}
+                    className="p-1.5 rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mb-4">Complete your account details to sync directly into Supabase Auth</p>
+
+                {setupError && (
+                  <div className="p-3 mb-4 rounded-xl bg-red-500/10 border border-red-500/25 text-red-600 dark:text-red-400 text-xs font-medium flex items-start gap-2">
+                    <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+                    <span>{setupError}</span>
+                  </div>
+                )}
+
                 <form onSubmit={(e) => {
                   e.preventDefault();
                   const fd = new FormData(e.currentTarget);
@@ -1277,20 +1320,29 @@ export default function App() {
                     </>
                   )}
                   <textarea name="description" placeholder="Short bio or business description" className="w-full bg-oc-cream dark:bg-white/5 border border-oc-gold/10 rounded-xl p-3.5 text-sm outline-none h-24 focus:border-oc-gold" />
-                  <button 
-                    type="submit" 
-                    disabled={isAuthLoading}
-                    className="w-full bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-3.5 rounded-xl shadow-lg mt-4 hover:opacity-90 transition-all flex items-center justify-center gap-2 disabled:opacity-70"
-                  >
-                    {isAuthLoading ? (
-                      <>
-                        <Loader2 size={18} className="animate-spin" />
-                        <span>Registering in Supabase Auth...</span>
-                      </>
-                    ) : (
-                      <span>Complete Setup & Register in Supabase</span>
-                    )}
-                  </button>
+                  <div className="flex gap-2 pt-2">
+                    <button 
+                      type="button" 
+                      onClick={() => { setShowSetupModal(false); setSetupError(''); }}
+                      className="w-1/3 py-3 rounded-xl border border-gray-200 dark:border-white/10 text-xs font-bold text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer"
+                    >
+                      Back
+                    </button>
+                    <button 
+                      type="submit" 
+                      disabled={isAuthLoading}
+                      className="flex-1 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-3 rounded-xl shadow-lg hover:opacity-90 transition-all flex items-center justify-center gap-2 disabled:opacity-70 text-xs cursor-pointer"
+                    >
+                      {isAuthLoading ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          <span>Creating Profile...</span>
+                        </>
+                      ) : (
+                        <span>Complete Profile & Join</span>
+                      )}
+                    </button>
+                  </div>
                 </form>
               </motion.div>
             </div>

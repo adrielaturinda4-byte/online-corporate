@@ -3,14 +3,14 @@ import { User } from '../types';
 
 // Supabase configuration for Online Corporate
 export const SUPABASE_PROJECT_NAME = "Online corporate";
-export const SUPABASE_PROJECT_ID = "fkmuaxvpxmfoeprorpxl";
+export const SUPABASE_PROJECT_ID = "izlzhgktmsmxuaglriiw";
 export const SUPABASE_URL = (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) 
   || (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL)
-  || "https://fkmuaxvpxmfoeprorpxl.supabase.co";
+  || "https://izlzhgktmsmxuaglriiw.supabase.co";
 
 export const SUPABASE_ANON_KEY = (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_ANON_KEY)
   || (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY)
-  || "sb_publishable_Zm-dW7k81oosJ1pUTQm7yQ_TBBuQEpS";
+  || "sb_publishable_sT-g5L82df8SnBZ-qprpag_R49es1K1";
 
 // Initialize the Supabase Client
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {

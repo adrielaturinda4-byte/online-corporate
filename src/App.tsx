@@ -223,7 +223,7 @@ export default function App() {
   const [showProfileVerificationForm, setShowProfileVerificationForm] = useState(false);
   const [viewingProfile, setViewingProfile] = useState<User | null>(null);
 
-  const isMainAdmin = currentUser?.email?.trim().toLowerCase() === 'adrielaturinda4@gmail.com';
+  const isMainAdmin = Boolean(currentUser?.isAdmin || currentUser?.role === 'Admin');
 
   const pendingVerificationsCount = useMemo(() => {
     return (Object.values(users) as User[]).filter(u => u.verificationPending || (u.verificationDoc && !u.isVerified)).length;
@@ -283,6 +283,26 @@ export default function App() {
     localStorage.setItem('oc_dark', String(newVal));
   };
 
+  // Sync dark mode class and color-scheme to document root for phone/mobile browsers
+  React.useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      document.body.classList.add('dark');
+      document.documentElement.style.colorScheme = 'dark';
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.body.classList.remove('dark');
+      document.documentElement.style.colorScheme = 'light';
+    }
+    let metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (!metaTheme) {
+      metaTheme = document.createElement('meta');
+      metaTheme.setAttribute('name', 'theme-color');
+      document.head.appendChild(metaTheme);
+    }
+    metaTheme.setAttribute('content', isDarkMode ? '#0f1923' : '#faf8f4');
+  }, [isDarkMode]);
+
   const handleAuth = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setAuthError('');
@@ -320,7 +340,7 @@ export default function App() {
             location: supMeta.location || existingLocal?.location || '',
             description: supMeta.description || existingLocal?.description || '',
             isVerified: existingLocal ? existingLocal.isVerified : true,
-            isAdmin: cleanEmail === 'adrielaturinda4@gmail.com',
+            isAdmin: Boolean(supMeta.isAdmin || supMeta.is_admin || existingLocal?.isAdmin || false),
             password: password,
             ...existingLocal,
           };
@@ -336,9 +356,9 @@ export default function App() {
           return;
         }
 
-        // 2. Check local fallback (admin account or local accounts)
+        // 2. Check local fallback
         const localUser = users[cleanEmail];
-        if (localUser && (localUser.password === password || cleanEmail === 'adrielaturinda4@gmail.com' && password === 'adrielissocool1')) {
+        if (localUser && localUser.password && localUser.password === password) {
           login(cleanEmail, localUser);
           setEmail('');
           setPassword('');
@@ -710,7 +730,7 @@ export default function App() {
       views: existing.views || 0,
       openToWork: true,
       isVerified: true,
-      isAdmin: tempEmail === 'adrielaturinda4@gmail.com'
+      isAdmin: Boolean(existing.isAdmin || false)
     };
     
     saveUser(newUser);
@@ -1442,7 +1462,23 @@ export default function App() {
           ))}
         </nav>
 
-        <div className="p-4 border-t border-oc-gold/10 space-y-1">
+        <div className="p-4 border-t border-oc-gold/10 space-y-2">
+          {/* Mobile & Desktop Theme Toggle in Sidebar */}
+          <button 
+            type="button"
+            onClick={toggleDarkMode}
+            className="flex items-center justify-between w-full px-4 py-2.5 text-sm rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition-all border border-oc-gold/10 cursor-pointer"
+            aria-label="Toggle dark and light theme"
+          >
+            <div className="flex items-center gap-3">
+              {isDarkMode ? <Sun size={17} className="text-oc-gold" /> : <Moon size={17} className="text-oc-gold" />}
+              <span className="font-medium text-xs">{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
+            </div>
+            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-oc-gold/20 text-oc-gold">
+              {isDarkMode ? 'Dark' : 'Light'}
+            </span>
+          </button>
+
           <button 
             onClick={() => { setActivePage('about'); setIsSidebarOpen(false); }}
             className={`flex items-center gap-4 w-full px-4 py-3 text-sm transition-colors rounded-xl ${
@@ -1527,10 +1563,13 @@ export default function App() {
               </>
             )}
             <button 
+              type="button"
               onClick={toggleDarkMode}
-              className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-white/5 text-gray-500 transition-colors"
+              className="p-2 sm:p-2.5 rounded-xl bg-oc-gold/10 hover:bg-oc-gold/20 text-oc-navy dark:text-oc-gold border border-oc-gold/20 transition-all flex items-center justify-center shrink-0 cursor-pointer min-w-[38px] min-h-[38px]"
+              title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              aria-label="Toggle dark and light mode"
             >
-              {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+              {isDarkMode ? <Sun size={18} className="text-oc-gold" /> : <Moon size={18} className="text-oc-navy dark:text-oc-gold" />}
             </button>
             <div className="h-8 w-px bg-oc-gold/10 mx-2" />
             <div className="text-right hidden xs:block">
@@ -2705,7 +2744,7 @@ export default function App() {
                     </div>
                     <h2 className="text-xl font-serif font-bold text-oc-navy dark:text-white">Access Restricted</h2>
                     <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                      The Admin Control Center is strictly reserved for the master administrator account (<strong className="text-oc-navy dark:text-oc-gold">adrielaturinda4@gmail.com</strong>).
+                      The Admin Control Center is strictly reserved for accounts with authorized administrator privileges.
                     </p>
                     <button
                       onClick={() => setActivePage('home')}
@@ -2747,7 +2786,7 @@ export default function App() {
                         </button>
                         
                         <span className="px-3.5 py-2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-2xl text-xs font-bold flex items-center gap-2">
-                          <Shield size={15} /> Sole Master Administrator
+                          <Shield size={15} /> Platform Administrator
                         </span>
                       </div>
                     </div>
@@ -3136,11 +3175,17 @@ export default function App() {
                                           <ShieldCheck size={16} />
                                         </button>
 
-                                        {u.email.toLowerCase() === 'adrielaturinda4@gmail.com' && (
-                                          <span className="p-2 bg-purple-500/10 text-purple-500 rounded-xl" title="Sole Master Administrator">
-                                            <Shield size={16} />
-                                          </span>
-                                        )}
+                                        <button
+                                          onClick={() => toggleUserAdmin(u.email, !u.isAdmin)}
+                                          className={`p-2 rounded-xl transition-all ${
+                                            u.isAdmin 
+                                              ? 'bg-purple-500/10 text-purple-500 hover:bg-purple-500/20' 
+                                              : 'bg-gray-100 dark:bg-white/5 text-gray-400 hover:text-purple-500'
+                                          }`}
+                                          title={u.isAdmin ? "Revoke Admin Privileges" : "Grant Admin Privileges"}
+                                        >
+                                          <Shield size={16} />
+                                        </button>
 
                                         <button
                                           onClick={() => setViewingProfile(u)}

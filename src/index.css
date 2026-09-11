@@ -1,6 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Sora:wght@100..800&display=swap');
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Sora", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Playfair Display", ui-serif, Georgia, serif;
@@ -14,21 +16,42 @@
 }
 
 @layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  :root.dark,
+  html.dark {
+    color-scheme: dark;
+  }
+
+  html, body {
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
   body {
-    @apply bg-oc-cream text-oc-navy-mid font-sans antialiased transition-colors duration-200;
+    background-color: var(--color-oc-cream);
+    color: var(--color-oc-navy-mid);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
   
-  .dark body,
-  .dark {
-    color-scheme: dark;
+  html.dark body,
+  body.dark {
+    background-color: var(--color-oc-navy-mid);
     color: #f3f4f6;
   }
 
+  html.dark p,
   .dark p {
     color: #e5e7eb;
   }
   
   h1, h2, h3, h4, .font-serif {
-    @apply font-serif;
+    font-family: var(--font-serif);
   }
 }

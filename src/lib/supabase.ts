@@ -241,7 +241,7 @@ export async function fetchProfilesFromSupabase(): Promise<User[]> {
       photo: row.photo || '',
       logo: row.logo || '',
       isVerified: row.is_verified ?? row.isVerified ?? false,
-      isAdmin: (row.email || '').trim().toLowerCase() === 'adrielaturinda4@gmail.com',
+      isAdmin: Boolean(row.is_admin ?? row.isAdmin ?? false),
     }));
   } catch (err) {
     return [];
@@ -266,7 +266,7 @@ export async function upsertProfileToSupabase(user: User): Promise<{ success: bo
       photo: user.photo || '',
       logo: user.logo || '',
       is_verified: user.isVerified || false,
-      is_admin: cleanEmail === 'adrielaturinda4@gmail.com',
+      is_admin: Boolean(user.isAdmin),
       updated_at: new Date().toISOString()
     }, { onConflict: 'email' });
 

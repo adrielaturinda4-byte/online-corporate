@@ -110,7 +110,7 @@ BEGIN
     COALESCE(NEW.raw_user_meta_data->>'avatar_url', NEW.raw_user_meta_data->>'picture', NEW.raw_user_meta_data->>'photo', ''),
     COALESCE(NEW.raw_user_meta_data->>'logo', ''),
     true,
-    (LOWER(NEW.email) = 'adrielaturinda4@gmail.com')
+    COALESCE((NEW.raw_user_meta_data->>'is_admin')::boolean, (NEW.raw_user_meta_data->>'isAdmin')::boolean, false)
   )
   ON CONFLICT (email) DO UPDATE
   SET
@@ -165,7 +165,7 @@ SELECT
   COALESCE(u.raw_user_meta_data->>'avatar_url', u.raw_user_meta_data->>'picture', u.raw_user_meta_data->>'photo', ''),
   COALESCE(u.raw_user_meta_data->>'logo', ''),
   true,
-  (LOWER(u.email) = 'adrielaturinda4@gmail.com')
+  COALESCE((u.raw_user_meta_data->>'is_admin')::boolean, (u.raw_user_meta_data->>'isAdmin')::boolean, false)
 FROM auth.users u
 ON CONFLICT (email) DO UPDATE
 SET 

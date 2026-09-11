@@ -43,32 +43,11 @@ export function useAppStorage() {
           const u = JSON.parse(localStorage.getItem(key) || '');
           if (u && u.email && !fakeSeedEmails.includes(u.email.trim().toLowerCase())) {
             const e = u.email.trim().toLowerCase();
-            if (e !== 'adrielaturinda4@gmail.com') {
-              u.isAdmin = false;
-            }
             loadedUsers[e] = u;
           }
         } catch (e) {}
       }
     }
-
-    // Ensure Admin Account adrielaturinda4@gmail.com is present with requested credentials and permissions
-    const adminEmail = 'adrielaturinda4@gmail.com';
-    const existingAdmin = loadedUsers[adminEmail];
-    const adminUser: User = {
-      ...(existingAdmin || {}),
-      email: adminEmail,
-      password: 'adrielissocool1',
-      isAdmin: true,
-      isVerified: true,
-      name: existingAdmin?.name || 'Adriel Aturinda',
-      bizName: existingAdmin?.bizName || 'Online Corporate Administration',
-      role: existingAdmin?.role || 'BusinessOwner',
-      country: existingAdmin?.country || 'Uganda',
-      description: existingAdmin?.description || 'Platform Administrator & Founder'
-    };
-    loadedUsers[adminEmail] = adminUser;
-    localStorage.setItem(`oc_u_${adminEmail}`, JSON.stringify(adminUser));
 
     setUsers(loadedUsers);
 
@@ -96,7 +75,7 @@ export function useAppStorage() {
         description: meta.description || existing?.description || '',
         photo: meta.avatar_url || meta.picture || existing?.photo || '',
         isVerified: existing ? existing.isVerified : true,
-        isAdmin: supEmail === 'adrielaturinda4@gmail.com',
+        isAdmin: Boolean(meta.isAdmin || meta.is_admin || existing?.isAdmin || false),
         ...existing,
       };
 
@@ -529,17 +508,14 @@ export function useAppStorage() {
     });
   };
 
-  const toggleUserAdmin = (email: string, _isAdmin: boolean) => {
+  const toggleUserAdmin = (email: string, isAdmin: boolean) => {
     const cleanEmail = email.trim().toLowerCase();
-    if (cleanEmail !== 'adrielaturinda4@gmail.com') {
-      return;
-    }
     const targetUser = users[cleanEmail];
     if (!targetUser) return;
 
     const updated: User = {
       ...targetUser,
-      isAdmin: true
+      isAdmin: Boolean(isAdmin)
     };
 
     saveUser(updated);

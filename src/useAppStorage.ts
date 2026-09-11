@@ -9,7 +9,21 @@ import {
   fetchMessagesFromSupabase,
   sendMessageToSupabase,
   markMessagesAsReadInSupabase,
-  subscribeToMessages
+  subscribeToMessages,
+  fetchJobsFromSupabase,
+  createJobInSupabase,
+  deleteJobFromSupabase,
+  fetchApplicationsFromSupabase,
+  createApplicationInSupabase,
+  updateApplicationStatusInSupabase,
+  fetchEventsFromSupabase,
+  createEventInSupabase,
+  updateEventAttendeesInSupabase,
+  deleteEventFromSupabase,
+  fetchCommunityPostsFromSupabase,
+  createCommunityPostInSupabase,
+  updateCommunityPostLikesInSupabase,
+  deleteCommunityPostFromSupabase
 } from './lib/supabase';
 
 export function useAppStorage() {
@@ -142,6 +156,54 @@ export function useAppStorage() {
       }
     } catch (e) {}
 
+    // Synchronize Jobs from Supabase
+    fetchJobsFromSupabase().then(remoteJobs => {
+      if (remoteJobs && remoteJobs.length > 0) {
+        setJobs(prev => {
+          const map = new Map<number, Job>();
+          remoteJobs.forEach(j => map.set(j.id, j));
+          prev.forEach(j => {
+            if (!map.has(j.id)) map.set(j.id, j);
+          });
+          const merged = Array.from(map.values()).sort((a, b) => b.id - a.id);
+          localStorage.setItem('oc_jobs', JSON.stringify(merged));
+          return merged;
+        });
+      }
+    }).catch(() => {});
+
+    // Synchronize Events from Supabase
+    fetchEventsFromSupabase().then(remoteEvents => {
+      if (remoteEvents && remoteEvents.length > 0) {
+        setEvents(prev => {
+          const map = new Map<string, ProfessionalEvent>();
+          remoteEvents.forEach(e => map.set(e.id, e));
+          prev.forEach(e => {
+            if (!map.has(e.id)) map.set(e.id, e);
+          });
+          const merged = Array.from(map.values());
+          localStorage.setItem('oc_events', JSON.stringify(merged));
+          return merged;
+        });
+      }
+    }).catch(() => {});
+
+    // Synchronize Community Posts from Supabase
+    fetchCommunityPostsFromSupabase().then(remotePosts => {
+      if (remotePosts && remotePosts.length > 0) {
+        setCommunityPosts(prev => {
+          const map = new Map<string, CommunityPost>();
+          remotePosts.forEach(p => map.set(p.id, p));
+          prev.forEach(p => {
+            if (!map.has(p.id)) map.set(p.id, p);
+          });
+          const merged = Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp);
+          localStorage.setItem('oc_posts', JSON.stringify(merged));
+          return merged;
+        });
+      }
+    }).catch(() => {});
+
     setIsLoading(false);
   }, []);
 
@@ -227,6 +289,26 @@ export function useAppStorage() {
     };
   }, [currentUser?.email]);
 
+  // Synchronize applications from Supabase for the current user (candidate or employer)
+  useEffect(() => {
+    if (!currentUser?.email) return;
+    const myEmail = currentUser.email.trim().toLowerCase();
+    fetchApplicationsFromSupabase(myEmail).then(remoteApps => {
+      if (remoteApps && remoteApps.length > 0) {
+        setApplications(prev => {
+          const map = new Map<string, JobApplication>();
+          remoteApps.forEach(a => map.set(a.id, a));
+          prev.forEach(a => {
+            if (!map.has(a.id)) map.set(a.id, a);
+          });
+          const merged = Array.from(map.values()).sort((a, b) => b.appliedAt - a.appliedAt);
+          localStorage.setItem('oc_applications', JSON.stringify(merged));
+          return merged;
+        });
+      }
+    }).catch(() => {});
+  }, [currentUser?.email]);
+
   const saveUser = (user: User) => {
     const cleanEmail = user.email.trim().toLowerCase();
     const updatedUser = { ...user, email: cleanEmail };
@@ -270,21 +352,25 @@ export function useAppStorage() {
 
   const createJobApplication = (job: Job) => {
     if (!currentUser) return;
+    const cleanEmployer = job.posterEmail.trim().toLowerCase();
+    const cleanCandidate = currentUser.email.trim().toLowerCase();
     const newApp: JobApplication = {
       id: `app_${Date.now()}`,
       jobId: job.id.toString(),
       jobTitle: job.title,
-      employerEmail: job.posterEmail,
-      candidateEmail: currentUser.email,
-      candidateName: currentUser.name || currentUser.bizName || currentUser.email,
+      employerEmail: cleanEmployer,
+      candidateEmail: cleanCandidate,
+      candidateName: currentUser.name || currentUser.bizName || cleanCandidate,
       candidatePhoto: currentUser.photo || currentUser.logo,
       status: 'Applied',
       appliedAt: Date.now(),
       updatedAt: Date.now()
     };
-    const newList = [newApp, ...applications];
+    const newList = [newApp, ...applications.filter(a => a.id !== newApp.id)];
     setApplications(newList);
     localStorage.setItem('oc_applications', JSON.stringify(newList));
+    // Persist to Supabase so the employer can see it in real-time
+    createApplicationInSupabase(newApp).catch(() => {});
   };
 
   const updateApplicationStatus = (appId: string, status: ApplicationStatus) => {
@@ -293,6 +379,8 @@ export function useAppStorage() {
     );
     setApplications(newList);
     localStorage.setItem('oc_applications', JSON.stringify(newList));
+    // Update in Supabase
+    updateApplicationStatusInSupabase(appId, status).catch(() => {});
     
     const app = applications.find(a => a.id === appId);
     if (app) {
@@ -306,10 +394,11 @@ export function useAppStorage() {
 
   const addCommunityPost = (content: string, image?: string) => {
     if (!currentUser) return;
+    const cleanEmail = currentUser.email.trim().toLowerCase();
     const newPost: CommunityPost = {
       id: Date.now().toString(),
-      authorEmail: currentUser.email,
-      authorName: currentUser.bizName || currentUser.name || currentUser.email,
+      authorEmail: cleanEmail,
+      authorName: currentUser.bizName || currentUser.name || cleanEmail,
       authorPhoto: currentUser.photo || currentUser.logo,
       content,
       image,
@@ -319,56 +408,71 @@ export function useAppStorage() {
     const newList = [newPost, ...communityPosts];
     setCommunityPosts(newList);
     localStorage.setItem('oc_posts', JSON.stringify(newList));
+    // Persist to Supabase so every user sees this community post
+    createCommunityPostInSupabase(newPost).catch(() => {});
   };
 
   const likePost = (postId: string) => {
     if (!currentUser) return;
+    const cleanEmail = currentUser.email.trim().toLowerCase();
+    let updatedLikes: string[] = [];
     const newList = communityPosts.map(p => {
       if (p.id === postId) {
-        const liked = p.likes.includes(currentUser.email);
+        const liked = p.likes.includes(cleanEmail);
+        updatedLikes = liked 
+          ? p.likes.filter(e => e !== cleanEmail)
+          : [...p.likes, cleanEmail];
         return {
           ...p,
-          likes: liked 
-            ? p.likes.filter(e => e !== currentUser.email)
-            : [...p.likes, currentUser.email]
+          likes: updatedLikes
         };
       }
       return p;
     });
     setCommunityPosts(newList);
     localStorage.setItem('oc_posts', JSON.stringify(newList));
+    // Update likes in Supabase
+    updateCommunityPostLikesInSupabase(postId, updatedLikes).catch(() => {});
   };
 
   const addEvent = (event: Omit<ProfessionalEvent, 'id' | 'hostEmail' | 'hostName' | 'attendees'>) => {
     if (!currentUser) return;
+    const cleanEmail = currentUser.email.trim().toLowerCase();
     const newEvent: ProfessionalEvent = {
       ...event,
       id: Date.now().toString(),
-      hostEmail: currentUser.email,
-      hostName: currentUser.bizName || currentUser.name || currentUser.email,
-      attendees: [currentUser.email]
+      hostEmail: cleanEmail,
+      hostName: currentUser.bizName || currentUser.name || cleanEmail,
+      attendees: [cleanEmail]
     };
     const newList = [newEvent, ...events];
     setEvents(newList);
     localStorage.setItem('oc_events', JSON.stringify(newList));
+    // Persist to Supabase so everyone can see and discover the event
+    createEventInSupabase(newEvent).catch(() => {});
   };
 
   const joinEvent = (eventId: string) => {
     if (!currentUser) return;
+    const cleanEmail = currentUser.email.trim().toLowerCase();
+    let updatedAttendees: string[] = [];
     const newList = events.map(e => {
       if (e.id === eventId) {
-        const attending = e.attendees.includes(currentUser.email);
+        const attending = e.attendees.includes(cleanEmail);
+        updatedAttendees = attending 
+          ? e.attendees.filter(a => a !== cleanEmail)
+          : [...e.attendees, cleanEmail];
         return {
           ...e,
-          attendees: attending 
-            ? e.attendees.filter(a => a !== currentUser.email)
-            : [...e.attendees, currentUser.email]
+          attendees: updatedAttendees
         };
       }
       return e;
     });
     setEvents(newList);
     localStorage.setItem('oc_events', JSON.stringify(newList));
+    // Update attendees in Supabase
+    updateEventAttendeesInSupabase(eventId, updatedAttendees).catch(() => {});
   };
 
   const addNotificationTo = (email: string, notif: Omit<Notification, 'id' | 'time' | 'read'>) => {
@@ -521,10 +625,27 @@ export function useAppStorage() {
     saveUser(updated);
   };
 
+  const addJob = (jobData: Omit<Job, 'id'> | Job) => {
+    const newJob: Job = {
+      ...jobData,
+      id: 'id' in jobData && jobData.id ? jobData.id : Date.now()
+    };
+    const updated = [newJob, ...jobs.filter(j => j.id !== newJob.id)];
+    setJobs(updated);
+    localStorage.setItem('oc_jobs', JSON.stringify(updated));
+    // Persist to Supabase so all users can see this job posting
+    createJobInSupabase(newJob).then(res => {
+      if (res.data?.id && res.data.id !== newJob.id) {
+        setJobs(curr => curr.map(j => j.id === newJob.id ? { ...j, id: res.data!.id } : j));
+      }
+    }).catch(() => {});
+  };
+
   const deleteJob = (jobId: number) => {
     const updated = jobs.filter(j => j.id !== jobId);
     setJobs(updated);
     localStorage.setItem('oc_jobs', JSON.stringify(updated));
+    deleteJobFromSupabase(jobId).catch(() => {});
   };
 
   const deleteAnnouncement = (annId: number) => {
@@ -537,12 +658,14 @@ export function useAppStorage() {
     const updated = communityPosts.filter(p => p.id !== postId);
     setCommunityPosts(updated);
     localStorage.setItem('oc_posts', JSON.stringify(updated));
+    deleteCommunityPostFromSupabase(postId).catch(() => {});
   };
 
   const deleteEvent = (eventId: string) => {
     const updated = events.filter(e => e.id !== eventId);
     setEvents(updated);
     localStorage.setItem('oc_events', JSON.stringify(updated));
+    deleteEventFromSupabase(eventId).catch(() => {});
   };
 
   const broadcastNotification = (title: string, message: string) => {
@@ -628,6 +751,7 @@ export function useAppStorage() {
     addNotificationTo,
     setAnnouncements,
     setJobs,
+    addJob,
     addCommunityPost,
     likePost,
     addEvent,

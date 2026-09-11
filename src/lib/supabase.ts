@@ -1,5 +1,5 @@
 import { createClient, User as SupabaseUser } from '@supabase/supabase-js';
-import { User } from '../types';
+import { User, Job, JobApplication, ApplicationStatus, ProfessionalEvent, CommunityPost } from '../types';
 
 // Supabase configuration for Online Corporate
 export const SUPABASE_PROJECT_NAME = "Online corporate";
@@ -467,4 +467,292 @@ export function subscribeToMessages(userEmail: string, onNewMessage: (msg: any) 
   return () => {
     supabase.removeChannel(channel);
   };
+}
+
+// ==============================================================================
+// JOBS SUPABASE INTEGRATION
+// ==============================================================================
+
+export async function fetchJobsFromSupabase(): Promise<Job[]> {
+  try {
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error || !data) return [];
+    return data.map(row => ({
+      id: Number(row.id),
+      title: row.title || '',
+      type: (row.type as any) || 'fulltime',
+      salary: row.salary || '',
+      location: row.location || '',
+      contact: row.contact || '',
+      desc: row.description || '',
+      posterEmail: (row.poster_email || '').trim().toLowerCase(),
+      posterName: row.poster_name || '',
+      posterRole: row.poster_role || 'Employer',
+      time: row.posted_time || (row.created_at ? new Date(row.created_at).toLocaleDateString() : 'Recently')
+    }));
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function createJobInSupabase(job: Omit<Job, 'id'> | Job): Promise<{ success: boolean; data?: Job; error?: string }> {
+  try {
+    const cleanPoster = job.posterEmail.trim().toLowerCase();
+    const { data, error } = await supabase
+      .from('jobs')
+      .insert([{
+        title: job.title,
+        type: job.type,
+        salary: job.salary || '',
+        location: job.location,
+        contact: job.contact,
+        description: job.desc,
+        poster_email: cleanPoster,
+        poster_name: job.posterName,
+        poster_role: job.posterRole || 'Employer',
+        posted_time: job.time || new Date().toLocaleDateString()
+      }])
+      .select();
+
+    if (error) return { success: false, error: error.message };
+    const row = data?.[0];
+    if (!row) return { success: true };
+    return {
+      success: true,
+      data: {
+        id: Number(row.id),
+        title: row.title,
+        type: row.type,
+        salary: row.salary,
+        location: row.location,
+        contact: row.contact,
+        desc: row.description,
+        posterEmail: row.poster_email,
+        posterName: row.poster_name,
+        posterRole: row.poster_role,
+        time: row.posted_time
+      }
+    };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
+export async function deleteJobFromSupabase(jobId: number): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('jobs').delete().eq('id', jobId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+// ==============================================================================
+// JOB APPLICATIONS SUPABASE INTEGRATION
+// ==============================================================================
+
+export async function fetchApplicationsFromSupabase(userEmail?: string): Promise<JobApplication[]> {
+  try {
+    let query = supabase.from('job_applications').select('*');
+    if (userEmail) {
+      const cleanEmail = userEmail.trim().toLowerCase();
+      query = query.or(`candidate_email.eq.${cleanEmail},employer_email.eq.${cleanEmail}`);
+    }
+    const { data, error } = await query.order('applied_at', { ascending: false });
+    if (error || !data) return [];
+    return data.map(row => ({
+      id: String(row.id),
+      jobId: String(row.job_id),
+      jobTitle: row.job_title || '',
+      employerEmail: (row.employer_email || '').trim().toLowerCase(),
+      candidateEmail: (row.candidate_email || '').trim().toLowerCase(),
+      candidateName: row.candidate_name || '',
+      candidatePhoto: row.candidate_photo || '',
+      status: (row.status as ApplicationStatus) || 'Applied',
+      appliedAt: Number(row.applied_at) || (row.created_at ? new Date(row.created_at).getTime() : Date.now()),
+      updatedAt: Number(row.updated_at) || Date.now()
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function createApplicationInSupabase(app: JobApplication): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('job_applications').upsert({
+      id: app.id,
+      job_id: app.jobId,
+      job_title: app.jobTitle,
+      employer_email: app.employerEmail.trim().toLowerCase(),
+      candidate_email: app.candidateEmail.trim().toLowerCase(),
+      candidate_name: app.candidateName,
+      candidate_photo: app.candidatePhoto || '',
+      status: app.status,
+      applied_at: app.appliedAt,
+      updated_at: app.updatedAt
+    }, { onConflict: 'id' });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
+export async function updateApplicationStatusInSupabase(appId: string, status: ApplicationStatus): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase
+      .from('job_applications')
+      .update({ status, updated_at: Date.now() })
+      .eq('id', appId);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
+// ==============================================================================
+// EVENTS SUPABASE INTEGRATION
+// ==============================================================================
+
+export async function fetchEventsFromSupabase(): Promise<ProfessionalEvent[]> {
+  try {
+    const { data, error } = await supabase
+      .from('events')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error || !data) return [];
+    return data.map(row => ({
+      id: String(row.id),
+      hostEmail: (row.host_email || '').trim().toLowerCase(),
+      hostName: row.host_name || '',
+      title: row.title || '',
+      description: row.description || '',
+      date: row.date || '',
+      location: row.location || '',
+      type: (row.type as any) || 'Meetup',
+      attendees: Array.isArray(row.attendees) ? row.attendees : [],
+      image: row.image || ''
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function createEventInSupabase(event: ProfessionalEvent): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('events').upsert({
+      id: event.id,
+      host_email: event.hostEmail.trim().toLowerCase(),
+      host_name: event.hostName,
+      title: event.title,
+      description: event.description,
+      date: event.date,
+      location: event.location,
+      type: event.type,
+      attendees: event.attendees || [],
+      image: event.image || ''
+    }, { onConflict: 'id' });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
+export async function updateEventAttendeesInSupabase(eventId: string, attendees: string[]): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('events')
+      .update({ attendees })
+      .eq('id', eventId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteEventFromSupabase(eventId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('events').delete().eq('id', eventId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+// ==============================================================================
+// COMMUNITY FEED POSTS SUPABASE INTEGRATION
+// ==============================================================================
+
+export async function fetchCommunityPostsFromSupabase(): Promise<CommunityPost[]> {
+  try {
+    const { data, error } = await supabase
+      .from('community_posts')
+      .select('*')
+      .order('timestamp', { ascending: false });
+
+    if (error || !data) return [];
+    return data.map(row => ({
+      id: String(row.id),
+      authorEmail: (row.author_email || '').trim().toLowerCase(),
+      authorName: row.author_name || '',
+      authorPhoto: row.author_photo || '',
+      content: row.content || '',
+      image: row.image || '',
+      timestamp: Number(row.timestamp) || (row.created_at ? new Date(row.created_at).getTime() : Date.now()),
+      likes: Array.isArray(row.likes) ? row.likes : []
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function createCommunityPostInSupabase(post: CommunityPost): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('community_posts').upsert({
+      id: post.id,
+      author_email: post.authorEmail.trim().toLowerCase(),
+      author_name: post.authorName,
+      author_photo: post.authorPhoto || '',
+      content: post.content,
+      image: post.image || '',
+      timestamp: post.timestamp,
+      likes: post.likes || []
+    }, { onConflict: 'id' });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
+export async function updateCommunityPostLikesInSupabase(postId: string, likes: string[]): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('community_posts')
+      .update({ likes })
+      .eq('id', postId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteCommunityPostFromSupabase(postId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('community_posts').delete().eq('id', postId);
+    return !error;
+  } catch {
+    return false;
+  }
 }

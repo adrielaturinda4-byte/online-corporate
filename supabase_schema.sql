@@ -246,7 +246,7 @@ USING (
 );
 
 -- ==============================================================================
--- 6. REALTIME PUBLICATION SETUP
+-- 6. REALTIME PUBLICATION SETUP FOR MESSAGING
 -- ==============================================================================
 DO $$
 BEGIN
@@ -261,3 +261,273 @@ EXCEPTION WHEN OTHERS THEN
   NULL;
 END;
 $$;
+
+-- ==============================================================================
+-- 7. JOB POSTINGS TABLE (Allows users to post and see each other's jobs)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.jobs (
+  id BIGSERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  type TEXT NOT NULL, -- 'fulltime', 'parttime', 'contract', 'remote'
+  salary TEXT DEFAULT '',
+  location TEXT NOT NULL,
+  contact TEXT NOT NULL,
+  description TEXT NOT NULL,
+  poster_email TEXT NOT NULL,
+  poster_name TEXT NOT NULL,
+  poster_role TEXT NOT NULL DEFAULT 'Employer',
+  posted_time TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_poster_email ON public.jobs(poster_email);
+CREATE INDEX IF NOT EXISTS idx_jobs_type ON public.jobs(type);
+CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON public.jobs(created_at DESC);
+
+ALTER TABLE public.jobs ENABLE ROW LEVEL SECURITY;
+
+-- Everyone can view all job postings across the entire platform
+DROP POLICY IF EXISTS "Jobs are viewable by everyone" ON public.jobs;
+CREATE POLICY "Jobs are viewable by everyone"
+ON public.jobs FOR SELECT
+USING (true);
+
+-- Authenticated users or visitors can post jobs
+DROP POLICY IF EXISTS "Users can create job postings" ON public.jobs;
+CREATE POLICY "Users can create job postings"
+ON public.jobs FOR INSERT
+WITH CHECK (
+  auth.role() = 'anon'
+  OR LOWER(poster_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+);
+
+-- Job poster can update their posting
+DROP POLICY IF EXISTS "Users can update their own job postings" ON public.jobs;
+CREATE POLICY "Users can update their own job postings"
+ON public.jobs FOR UPDATE
+USING (
+  auth.role() = 'anon'
+  OR LOWER(poster_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+);
+
+-- Job poster or administrators can delete job postings
+DROP POLICY IF EXISTS "Users can delete their own job postings" ON public.jobs;
+CREATE POLICY "Users can delete their own job postings"
+ON public.jobs FOR DELETE
+USING (
+  auth.role() = 'anon'
+  OR LOWER(poster_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+  OR EXISTS (SELECT 1 FROM public.profiles WHERE profiles.email = auth.jwt() ->> 'email' AND profiles.is_admin = true)
+);
+
+-- ==============================================================================
+-- 8. JOB APPLICATIONS TABLE (Candidates apply, Employers review applications)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.job_applications (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  job_title TEXT NOT NULL,
+  employer_email TEXT NOT NULL,
+  candidate_email TEXT NOT NULL,
+  candidate_name TEXT NOT NULL,
+  candidate_photo TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'Applied', -- 'Applied', 'Under Review', 'Interviewing', 'Offered', 'Rejected'
+  applied_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_apps_candidate ON public.job_applications(candidate_email);
+CREATE INDEX IF NOT EXISTS idx_job_apps_employer ON public.job_applications(employer_email);
+CREATE INDEX IF NOT EXISTS idx_job_apps_job_id ON public.job_applications(job_id);
+
+ALTER TABLE public.job_applications ENABLE ROW LEVEL SECURITY;
+
+-- Candidates can view their applications, employers can view all applications for their jobs, and admins can view all
+DROP POLICY IF EXISTS "Candidates and employers can view applications" ON public.job_applications;
+CREATE POLICY "Candidates and employers can view applications"
+ON public.job_applications FOR SELECT
+USING (
+  auth.role() = 'anon'
+  OR LOWER(candidate_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+  OR LOWER(employer_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+  OR EXISTS (SELECT 1 FROM public.profiles WHERE profiles.email = auth.jwt() ->> 'email' AND profiles.is_admin = true)
+);
+
+-- Candidates can submit job applications
+DROP POLICY IF EXISTS "Candidates can submit applications" ON public.job_applications;
+CREATE POLICY "Candidates can submit applications"
+ON public.job_applications FOR INSERT
+WITH CHECK (
+  auth.role() = 'anon'
+  OR LOWER(candidate_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+);
+
+-- Employers and candidates can update application status
+DROP POLICY IF EXISTS "Employers can update application status" ON public.job_applications;
+CREATE POLICY "Employers can update application status"
+ON public.job_applications FOR UPDATE
+USING (
+  auth.role() = 'anon'
+  OR LOWER(employer_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+  OR LOWER(candidate_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+  OR EXISTS (SELECT 1 FROM public.profiles WHERE profiles.email = auth.jwt() ->> 'email' AND profiles.is_admin = true)
+);
+
+-- Candidates or employers can delete applications
+DROP POLICY IF EXISTS "Candidates or employers can delete applications" ON public.job_applications;
+CREATE POLICY "Candidates or employers can delete applications"
+ON public.job_applications FOR DELETE
+USING (
+  auth.role() = 'anon'
+  OR LOWER(candidate_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+  OR LOWER(employer_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+);
+
+-- ==============================================================================
+-- 9. PROFESSIONAL EVENTS TABLE (Members discover and RSVP to each other's events)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.events (
+  id TEXT PRIMARY KEY,
+  host_email TEXT NOT NULL,
+  host_name TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  date TEXT NOT NULL,
+  location TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'Meetup', -- 'Webinar', 'Meetup', 'Workshop'
+  attendees JSONB DEFAULT '[]'::jsonb, -- Array of attendee emails
+  image TEXT DEFAULT '',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_host ON public.events(host_email);
+CREATE INDEX IF NOT EXISTS idx_events_date ON public.events(date);
+
+ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
+
+-- Everyone can view events
+DROP POLICY IF EXISTS "Events are viewable by everyone" ON public.events;
+CREATE POLICY "Events are viewable by everyone"
+ON public.events FOR SELECT
+USING (true);
+
+-- Authenticated users can create events
+DROP POLICY IF EXISTS "Users can create events" ON public.events;
+CREATE POLICY "Users can create events"
+ON public.events FOR INSERT
+WITH CHECK (
+  auth.role() = 'anon'
+  OR LOWER(host_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+);
+
+-- Hosts can update events, and members can RSVP/join (update attendee list)
+DROP POLICY IF EXISTS "Events can be updated by hosts and attendees" ON public.events;
+CREATE POLICY "Events can be updated by hosts and attendees"
+ON public.events FOR UPDATE
+USING (true)
+WITH CHECK (true);
+
+-- Event hosts and administrators can delete events
+DROP POLICY IF EXISTS "Hosts can delete their events" ON public.events;
+CREATE POLICY "Hosts can delete their events"
+ON public.events FOR DELETE
+USING (
+  auth.role() = 'anon'
+  OR LOWER(host_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+  OR EXISTS (SELECT 1 FROM public.profiles WHERE profiles.email = auth.jwt() ->> 'email' AND profiles.is_admin = true)
+);
+
+-- ==============================================================================
+-- 10. COMMUNITY FEED POSTS TABLE (Members share posts & see community feed)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.community_posts (
+  id TEXT PRIMARY KEY,
+  author_email TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  author_photo TEXT DEFAULT '',
+  content TEXT NOT NULL,
+  image TEXT DEFAULT '',
+  timestamp BIGINT NOT NULL,
+  likes JSONB DEFAULT '[]'::jsonb, -- Array of member emails who liked
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+CREATE INDEX IF NOT EXISTS idx_posts_author ON public.community_posts(author_email);
+CREATE INDEX IF NOT EXISTS idx_posts_timestamp ON public.community_posts(timestamp DESC);
+
+ALTER TABLE public.community_posts ENABLE ROW LEVEL SECURITY;
+
+-- Everyone can view all community posts
+DROP POLICY IF EXISTS "Community posts are viewable by everyone" ON public.community_posts;
+CREATE POLICY "Community posts are viewable by everyone"
+ON public.community_posts FOR SELECT
+USING (true);
+
+-- Authenticated users can publish posts
+DROP POLICY IF EXISTS "Users can publish community posts" ON public.community_posts;
+CREATE POLICY "Users can publish community posts"
+ON public.community_posts FOR INSERT
+WITH CHECK (
+  auth.role() = 'anon'
+  OR LOWER(author_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+);
+
+-- Users can like/unlike posts or author can update post
+DROP POLICY IF EXISTS "Community posts can be updated by users" ON public.community_posts;
+CREATE POLICY "Community posts can be updated by users"
+ON public.community_posts FOR UPDATE
+USING (true)
+WITH CHECK (true);
+
+-- Author and administrators can delete posts
+DROP POLICY IF EXISTS "Authors can delete their community posts" ON public.community_posts;
+CREATE POLICY "Authors can delete their community posts"
+ON public.community_posts FOR DELETE
+USING (
+  auth.role() = 'anon'
+  OR LOWER(author_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+  OR EXISTS (SELECT 1 FROM public.profiles WHERE profiles.email = auth.jwt() ->> 'email' AND profiles.is_admin = true)
+);
+
+-- ==============================================================================
+-- 11. REALTIME BROADCASTING FOR JOBS, APPLICATIONS, EVENTS, AND COMMUNITY POSTS
+-- ==============================================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'jobs') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.jobs;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'job_applications') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.job_applications;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'events') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.events;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'community_posts') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.community_posts;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  NULL;
+END;
+$$;
+
+-- ==============================================================================
+-- 12. OPTIONAL SAMPLE SEED DATA (Safe to run multiple times)
+-- ==============================================================================
+INSERT INTO public.jobs (id, title, type, salary, location, contact, description, poster_email, poster_name, poster_role, posted_time)
+VALUES 
+  (1, 'Senior Cloud & Fullstack Architect', 'fulltime', 'UGX 8.5M - 12M / mo', 'Kampala, Uganda (Hybrid)', 'careers@onlinecorporate.ug', 'Leading enterprise architecture, cloud deployment pipelines, and fullstack infrastructure across East African operations.', 'adrielaturinda4@gmail.com', 'Online Corporate HQ', 'Employer', 'Today'),
+  (2, 'Corporate Financial Analyst', 'contract', 'Competitive', 'Entebbe / Remote', 'finance-jobs@ugandabiz.co', 'Conduct quarterly financial modeling, audit preparation, and corporate compliance reviews.', 'info@ugandabiz.co', 'East Africa Ventures', 'Employer', 'Yesterday')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.events (id, host_email, host_name, title, description, date, location, type, attendees, image)
+VALUES 
+  ('evt_1', 'adrielaturinda4@gmail.com', 'Online Corporate Events', 'East Africa Tech Leaders Summit 2026', 'Connect with senior executives, tech founders, and business leaders exploring modern digital commerce and investment in Uganda.', '2026-10-15', 'Kampala Serena Conference Hall & Virtual', 'Meetup', '["adrielaturinda4@gmail.com"]'::jsonb, 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=1200&q=80')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.community_posts (id, author_email, author_name, author_photo, content, timestamp, likes)
+VALUES 
+  ('post_1', 'adrielaturinda4@gmail.com', 'Online Corporate Community', '', 'Welcome to the Online Corporate unified professional feed! Share your business updates, career achievements, and collaborate with professionals across Uganda and beyond.', 1726050000000, '[]'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+

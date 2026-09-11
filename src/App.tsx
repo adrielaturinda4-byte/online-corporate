@@ -107,6 +107,7 @@ export default function App() {
     addNotificationTo,
     setAnnouncements,
     setJobs,
+    addJob,
     addCommunityPost,
     likePost,
     addEvent,
@@ -2178,7 +2179,7 @@ export default function App() {
                           </button>
                           {currentUser?.email === job.posterEmail && (
                             <button 
-                              onClick={() => setJobs(jobs.filter(j => j.id !== job.id))}
+                              onClick={() => deleteJob(job.id)}
                               className="text-red-400 hover:text-red-500 transition-colors"
                             >
                               <Trash2 size={18} />
@@ -4240,8 +4241,7 @@ export default function App() {
                    posterRole: currentUser!.role!,
                    time: new Date().toLocaleDateString()
                  };
-                 setJobs([job, ...jobs]);
-                 localStorage.setItem('oc_jobs', JSON.stringify([job, ...jobs]));
+                 addJob(job);
                  setShowJobModal(false);
                }} className="space-y-4">
                  <input required name="title" placeholder="Job Title" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-4 text-sm outline-none" />

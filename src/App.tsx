@@ -73,6 +73,8 @@ import {
   resetPasswordForEmail,
   updateUserPassword
 } from './lib/supabase';
+import { VerifiedBadge } from './components/VerifiedBadge';
+import { AIDocumentVerificationModal } from './components/AIDocumentVerificationModal';
 
 // --- Sub-components (Simplified for now, can be extracted later) ---
 
@@ -538,6 +540,34 @@ export default function App() {
 
   const [isVerifyingAI, setIsVerifyingAI] = useState(false);
   const [verificationFeedback, setVerificationFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleVerificationCompleted = (result: {
+    verified: boolean;
+    reason: string;
+    docType: string;
+    confidence?: number;
+    checks?: { name: string; passed: boolean; detail: string }[];
+    docBase64: string;
+  }) => {
+    if (!currentUser) return;
+    if (result.verified) {
+      updateCurrentUser({
+        isVerified: true,
+        verificationPending: false,
+        verificationType: result.docType,
+        verificationReason: result.reason,
+        verificationConfidence: result.confidence,
+        verificationChecks: result.checks,
+        verificationDoc: result.docBase64,
+        verifiedAt: new Date().toISOString()
+      });
+      addNotificationTo(currentUser.email, {
+        type: 'account',
+        text: 'Profile Verified!',
+        sub: `Your ${result.docType} was verified by Gemini AI. Your profile now proudly displays the Verified Member badge.`
+      });
+    }
+  };
 
   const requestVerification = async (doc: string, type: string) => {
     if (!currentUser) return;
@@ -1504,8 +1534,20 @@ export default function App() {
             </button>
             <div className="h-8 w-px bg-oc-gold/10 mx-2" />
             <div className="text-right hidden xs:block">
-              <div className="text-sm font-semibold text-oc-navy dark:text-white">
-                {currentUser?.bizName || currentUser?.name || currentUser?.email}
+              <div className="text-sm font-semibold text-oc-navy dark:text-white flex items-center justify-end gap-1.5">
+                <span>{currentUser?.bizName || currentUser?.name || currentUser?.email}</span>
+                {currentUser?.isVerified ? (
+                  <VerifiedBadge variant="icon" size="xs" />
+                ) : currentUser ? (
+                  <button 
+                    onClick={() => setShowProfileVerificationForm(true)}
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-oc-gold/10 hover:bg-oc-gold/20 text-[10px] font-bold text-oc-gold transition-colors cursor-pointer"
+                    title="Get Verified Member Badge with AI"
+                  >
+                    <ShieldCheck size={11} />
+                    <span>Verify</span>
+                  </button>
+                ) : null}
               </div>
               <div className="text-[10px] text-oc-gold font-medium uppercase tracking-wider">
                 {currentUser?.role}
@@ -1916,7 +1958,10 @@ export default function App() {
                             <Building size={64} />
                           </div>
                           <img src={u.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-lg object-contain bg-white/5 p-1 mb-4 border border-white/10" alt="" />
-                          <div className="text-white font-bold text-sm mb-1 truncate">{u.bizName}</div>
+                          <div className="text-white font-bold text-sm mb-1 truncate flex items-center gap-1.5">
+                            <span>{u.bizName}</span>
+                            {u.isVerified && <VerifiedBadge variant="icon" size="xs" />}
+                          </div>
                           <div className="flex items-center justify-between">
                             <div className="text-oc-gold-light text-[10px] uppercase font-medium">{u.speciality || 'Professional'}</div>
                             <div className="flex items-center gap-0.5 text-oc-gold font-bold text-[10px]">
@@ -1951,7 +1996,10 @@ export default function App() {
                             <Star size={10} fill="currentColor" />
                             <span>{calcRating(u.ratings)}</span>
                           </div>
-                          <div className="font-bold text-sm mt-2 truncate text-oc-navy dark:text-white">{u.bizName || u.name}</div>
+                          <div className="font-bold text-sm mt-2 truncate text-oc-navy dark:text-white flex items-center gap-1.5">
+                            <span>{u.bizName || u.name}</span>
+                            {u.isVerified && <VerifiedBadge variant="icon" size="sm" />}
+                          </div>
                           <div className="text-xs text-gray-500 truncate">{u.speciality || u.occupation || u.email}</div>
                           {u.openToWork && u.role === 'Employee' && (
                             <div className="text-[9px] text-green-600 font-bold uppercase mt-1 flex items-center gap-1">
@@ -2069,8 +2117,9 @@ export default function App() {
                         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                           <div>
                             <h3 className="text-lg font-bold text-oc-navy dark:text-white mb-1">{job.title}</h3>
-                            <div className="text-oc-gold font-medium flex items-center gap-2 text-sm">
-                              {job.posterName}
+                            <div className="text-oc-gold font-medium flex items-center gap-2 text-sm flex-wrap">
+                              <span>{job.posterName}</span>
+                              {users[job.posterEmail]?.isVerified && <VerifiedBadge variant="icon" size="xs" />}
                               <Badge className="bg-oc-gold/10 text-oc-gold capitalize">{job.type}</Badge>
                             </div>
                           </div>
@@ -2152,7 +2201,10 @@ export default function App() {
                                 <img src={otherUser?.photo || otherUser?.logo || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover" alt="" />
                                 <div className="flex-1 min-w-0">
                                   <div className="flex justify-between items-baseline mb-1">
-                                    <div className="font-bold text-sm truncate">{otherUser?.name || otherUser?.bizName || otherEmail}</div>
+                                    <div className="font-bold text-sm truncate flex items-center gap-1.5">
+                                      <span>{otherUser?.name || otherUser?.bizName || otherEmail}</span>
+                                      {otherUser?.isVerified && <VerifiedBadge variant="icon" size="xs" />}
+                                    </div>
                                     <div className="text-[9px] text-gray-400 whitespace-nowrap ml-2">
                                       {lastMsg ? new Date(lastMsg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                     </div>
@@ -2198,7 +2250,10 @@ export default function App() {
                             alt="" 
                           />
                           <div className="flex-1">
-                            <div className="font-bold text-sm">{users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}</div>
+                            <div className="font-bold text-sm flex items-center gap-1.5">
+                              <span>{users[activeConversation]?.name || users[activeConversation]?.bizName || activeConversation}</span>
+                              {users[activeConversation]?.isVerified && <VerifiedBadge variant="icon" size="xs" />}
+                            </div>
                             <div className="text-[10px] text-green-500 font-medium">Online</div>
                           </div>
                         </div>
@@ -3461,21 +3516,18 @@ export default function App() {
                                   <span className="text-[10px] text-gray-400 font-normal">({currentUser.ratings?.length || 0})</span>
                                 </div>
                                 {currentUser.isVerified ? (
-                                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-600">
-                                    <CheckCircle size={10} /> Verified Member
-                                  </div>
+                                  <VerifiedBadge variant="pill" size="sm" />
                                 ) : currentUser.verificationPending ? (
-                                  <div className="flex flex-col items-start gap-1">
-                                    <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-oc-gold/10 text-oc-gold">
-                                      <Clock size={10} /> Verification Pending
-                                    </div>
+                                  <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                    <Clock size={11} /> Verification Pending
                                   </div>
                                 ) : (
                                   <button 
                                     onClick={() => setShowProfileVerificationForm(true)}
-                                    className="text-[9px] font-bold text-gray-400 hover:text-oc-gold underline uppercase tracking-tighter"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-oc-gold/10 hover:bg-oc-gold/20 text-oc-gold border border-oc-gold/20 transition-all shadow-sm cursor-pointer"
                                   >
-                                    Apply for Badge
+                                    <ShieldCheck size={11} />
+                                    <span>Verify ID with AI</span>
                                   </button>
                                 )}
                               </div>
@@ -3489,6 +3541,44 @@ export default function App() {
                           </div>
                         )}
                       </div>
+
+                      {/* AI Verification Status Card */}
+                      {!isEditingProfile && (
+                        currentUser.isVerified ? (
+                          <div className="mt-6">
+                            <VerifiedBadge 
+                              variant="card" 
+                              documentType={currentUser.verificationType} 
+                              verifiedAt={currentUser.verifiedAt}
+                              confidenceScore={currentUser.verificationConfidence}
+                            />
+                          </div>
+                        ) : (
+                          <div className="mt-6 p-4 rounded-2xl bg-gradient-to-r from-oc-navy/5 to-oc-gold/10 dark:from-white/5 dark:to-oc-gold/5 border border-oc-gold/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                            <div className="flex items-start gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-oc-gold/15 text-oc-gold flex items-center justify-center shrink-0 mt-0.5">
+                                <Sparkles size={20} />
+                              </div>
+                              <div>
+                                <div className="font-serif font-bold text-sm text-oc-navy dark:text-white flex items-center gap-2">
+                                  <span>Get Your Verified Member Badge</span>
+                                  <span className="text-[10px] font-sans font-bold px-2 py-0.5 rounded-full bg-oc-gold text-oc-navy uppercase tracking-wider">AI Powered</span>
+                                </div>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 max-w-xl">
+                                  Upload your National ID, Passport, or Business Registration. Gemini AI processes your document and issues your official verified badge.
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => setShowProfileVerificationForm(true)}
+                              className="shrink-0 px-4 py-2.5 rounded-xl bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold text-xs shadow-md hover:opacity-90 transition-all flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <ShieldCheck size={14} />
+                              <span>Verify with AI</span>
+                            </button>
+                          </div>
+                        )
+                      )}
 
                       <div className="mt-8 space-y-6">
                         <div className="grid sm:grid-cols-2 gap-4 text-sm">
@@ -3846,9 +3936,13 @@ export default function App() {
                 <div className="pt-16">
                   <div className="flex items-start justify-between">
                     <div>
-                      <h3 className="text-2xl font-serif font-bold dark:text-white">{viewingProfile.bizName || viewingProfile.name}</h3>
-                      <div className="flex gap-2 mt-1">
+                      <h3 className="text-2xl font-serif font-bold dark:text-white flex items-center gap-2">
+                        <span>{viewingProfile.bizName || viewingProfile.name}</span>
+                        {viewingProfile.isVerified && <VerifiedBadge variant="icon" size="md" />}
+                      </h3>
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
                         <Badge className="bg-oc-gold/10 text-oc-gold">{viewingProfile.role}</Badge>
+                        {viewingProfile.isVerified && <VerifiedBadge variant="pill" size="xs" />}
                         {viewingProfile.openToWork && <Badge className="bg-green-100 text-green-600">Open to Work</Badge>}
                         <div className="flex items-center gap-1 text-oc-gold font-bold text-xs ml-2">
                           <Star size={12} fill="currentColor" />
@@ -3858,6 +3952,16 @@ export default function App() {
                       </div>
                     </div>
                   </div>
+                  
+                  {viewingProfile.isVerified && (
+                    <div className="mt-4">
+                      <VerifiedBadge 
+                        variant="banner" 
+                        documentType={viewingProfile.verificationType} 
+                        verifiedAt={viewingProfile.verifiedAt} 
+                      />
+                    </div>
+                  )}
                   
                   {/* Rating Section for others */}
                   {currentUser && currentUser.email !== viewingProfile.email && (
@@ -4316,132 +4420,13 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Profile Verification Modal */}
-      <AnimatePresence>
-        {showProfileVerificationForm && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowProfileVerificationForm(false)} />
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-md bg-white dark:bg-oc-navy rounded-3xl p-8 shadow-2xl border border-oc-gold/10 z-10"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-oc-gold/10 rounded-2xl flex items-center justify-center text-oc-gold">
-                    <ShieldCheck size={24} />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-serif font-bold text-oc-navy dark:text-oc-gold-light tracking-tight">Identity Verification</h2>
-                    <p className="text-xs text-gray-500 font-medium">Optional • Apply for a Verified Badge</p>
-                  </div>
-                </div>
-                <button 
-                  type="button"
-                  onClick={() => setShowProfileVerificationForm(false)}
-                  className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-white rounded-full transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <div className="mb-5 p-3 bg-oc-gold/5 border border-oc-gold/10 rounded-2xl text-[11px] text-oc-navy/80 dark:text-gray-300 flex items-center gap-2">
-                <Sparkles size={16} className="text-oc-gold shrink-0" />
-                <span>Verification is <strong>100% optional</strong>. It adds a trust badge to your profile for employers & clients.</span>
-              </div>
-
-              {verificationFeedback && (
-                <div className={`mb-5 p-3.5 rounded-2xl text-xs flex items-center gap-2 border ${
-                  verificationFeedback.type === 'success' 
-                    ? 'bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400'
-                    : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400'
-                }`}>
-                  {verificationFeedback.type === 'success' ? <CheckCircle size={18} className="shrink-0" /> : <AlertCircle size={18} className="shrink-0" />}
-                  <span>{verificationFeedback.message}</span>
-                </div>
-              )}
-
-              {!isVerifyingAI ? (
-                <form onSubmit={(e) => {
-                  e.preventDefault();
-                  const fd = new FormData(e.currentTarget);
-                  const docType = fd.get('docType') as string;
-                  const fileInput = e.currentTarget.querySelector('input[type="file"]') as HTMLInputElement;
-                  const file = fileInput?.files?.[0];
-                  
-                  if (!file) {
-                    alert("Please select or capture a document image.");
-                    return;
-                  }
-
-                  const reader = new FileReader();
-                  reader.onloadend = () => {
-                    requestVerification(reader.result as string, docType);
-                  };
-                  reader.readAsDataURL(file);
-                }} className="space-y-5">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Document Type</label>
-                    <select name="docType" className="w-full bg-oc-cream dark:bg-white/5 rounded-xl p-3.5 text-sm outline-none border border-oc-gold/10 text-oc-navy dark:text-white">
-                      <option value="National ID">National ID Card</option>
-                      <option value="Passport">Passport</option>
-                      <option value="Driver License">Driver's License</option>
-                      <option value="Business License">Business License / Registration</option>
-                      <option value="Professional Certification">Professional Certificate</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold tracking-widest text-oc-gold">Upload Document Photo</label>
-                    <div className="border-2 border-dashed border-oc-gold/20 rounded-2xl p-6 text-center bg-oc-gold/5 group hover:bg-oc-gold/10 transition-all cursor-pointer relative">
-                      <input required type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" />
-                      <FileBadge className="mx-auto text-oc-gold/40 mb-2 group-hover:scale-110 transition-transform" size={40} />
-                      <p className="text-xs font-bold text-oc-gold">Tap to upload or take photo</p>
-                      <p className="text-[9px] text-gray-400 mt-1 uppercase">JPEG, PNG, WEBP (National ID / Passport)</p>
-                    </div>
-                  </div>
-
-                  <div className="p-3 bg-blue-50 dark:bg-blue-900/10 rounded-2xl border border-blue-100 dark:border-blue-800/50 flex gap-2.5">
-                    <ShieldCheck size={16} className="text-blue-500 shrink-0 mt-0.5" />
-                    <p className="text-[10px] leading-relaxed text-blue-700 dark:text-blue-300">
-                      Document analysis is powered by Gemini AI for instant document validation. Your image is processed securely.
-                    </p>
-                  </div>
-
-                  <div className="flex gap-3 pt-2">
-                    <button 
-                      type="button"
-                      onClick={() => setShowProfileVerificationForm(false)}
-                      className="flex-1 py-3 text-xs font-bold text-gray-500 hover:text-oc-navy dark:hover:text-white transition-colors"
-                    >
-                      Skip for Now
-                    </button>
-                    <button 
-                      type="submit"
-                      className="flex-1 bg-oc-navy dark:bg-oc-gold text-oc-gold dark:text-oc-navy font-bold py-3 rounded-xl shadow-lg hover:opacity-90 transition-all text-xs"
-                    >
-                      Verify Document with AI
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <div className="py-10 text-center space-y-5">
-                  <motion.div 
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-                    className="w-16 h-16 border-4 border-oc-gold border-t-transparent border-r-transparent rounded-full mx-auto flex items-center justify-center"
-                  >
-                    <ShieldCheck className="text-oc-gold" size={28} />
-                  </motion.div>
-                  <div className="space-y-1">
-                    <h3 className="text-lg font-serif font-bold animate-pulse">AI Verification in Progress</h3>
-                    <p className="text-xs text-gray-500 max-w-[220px] mx-auto">Gemini AI is examining your document for authenticity and readability...</p>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* AI Document Verification Modal */}
+      <AIDocumentVerificationModal
+        isOpen={showProfileVerificationForm}
+        onClose={() => setShowProfileVerificationForm(false)}
+        currentUser={currentUser}
+        onVerificationComplete={handleVerificationCompleted}
+      />
 
       {/* Appointment / Discovery Call Booking Modal */}
       <AnimatePresence>

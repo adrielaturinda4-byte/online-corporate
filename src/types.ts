@@ -53,6 +53,9 @@ export interface User {
   verificationDoc?: string;
   verificationType?: string;
   verificationReason?: string;
+  verificationConfidence?: number;
+  verificationChecks?: { name: string; passed: boolean; detail: string }[];
+  verifiedAt?: string;
 }
 
 export interface ProfessionalEvent {

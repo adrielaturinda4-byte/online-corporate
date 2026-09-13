@@ -1,5 +1,16 @@
 import { createClient, User as SupabaseUser } from '@supabase/supabase-js';
-import { User, Job, JobApplication, ApplicationStatus, ProfessionalEvent, CommunityPost } from '../types';
+import { 
+  User, 
+  Job, 
+  JobApplication, 
+  ApplicationStatus, 
+  ProfessionalEvent, 
+  CommunityPost,
+  Suggestion,
+  SuggestionCategory,
+  SuggestionStatus,
+  SuggestionUrgency
+} from '../types';
 
 // Supabase configuration for Online Corporate
 export const SUPABASE_PROJECT_NAME = "Online corporate";
@@ -751,6 +762,97 @@ export async function updateCommunityPostLikesInSupabase(postId: string, likes: 
 export async function deleteCommunityPostFromSupabase(postId: string): Promise<boolean> {
   try {
     const { error } = await supabase.from('community_posts').delete().eq('id', postId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+// ==============================================================================
+// SUGGESTIONS & FEEDBACK TO ADMIN INTEGRATION
+// ==============================================================================
+
+export async function fetchSuggestionsFromSupabase(userEmail?: string, isAdmin?: boolean): Promise<Suggestion[]> {
+  try {
+    let query = supabase.from('suggestions').select('*');
+    if (!isAdmin && userEmail) {
+      const cleanEmail = userEmail.trim().toLowerCase();
+      query = query.eq('sender_email', cleanEmail);
+    }
+    const { data, error } = await query.order('created_at', { ascending: false });
+    if (error || !data) return [];
+    return data.map(row => ({
+      id: String(row.id),
+      senderEmail: (row.sender_email || '').trim().toLowerCase(),
+      senderName: row.sender_name || '',
+      senderRole: row.sender_role || 'Member',
+      senderPhoto: row.sender_photo || '',
+      targetAdminEmail: (row.target_admin_email || '').trim().toLowerCase(),
+      category: (row.category as SuggestionCategory) || 'General Feedback',
+      subject: row.subject || '',
+      content: row.content || '',
+      urgency: (row.urgency as SuggestionUrgency) || 'Normal',
+      status: (row.status as SuggestionStatus) || 'Pending',
+      adminResponse: row.admin_response || '',
+      createdAt: Number(row.created_at_ms) || (row.created_at ? new Date(row.created_at).getTime() : Date.now()),
+      updatedAt: Number(row.updated_at_ms) || Date.now()
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function createSuggestionInSupabase(sugg: Suggestion): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('suggestions').upsert({
+      id: sugg.id,
+      sender_email: sugg.senderEmail.trim().toLowerCase(),
+      sender_name: sugg.senderName,
+      sender_role: sugg.senderRole || 'Member',
+      sender_photo: sugg.senderPhoto || '',
+      target_admin_email: sugg.targetAdminEmail.trim().toLowerCase(),
+      category: sugg.category,
+      subject: sugg.subject,
+      content: sugg.content,
+      urgency: sugg.urgency,
+      status: sugg.status,
+      admin_response: sugg.adminResponse || '',
+      created_at_ms: sugg.createdAt,
+      updated_at_ms: sugg.updatedAt
+    }, { onConflict: 'id' });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
+export async function updateSuggestionStatusInSupabase(
+  suggestionId: string, 
+  status: SuggestionStatus, 
+  adminResponse?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload: any = { status, updated_at_ms: Date.now() };
+    if (adminResponse !== undefined) {
+      payload.admin_response = adminResponse;
+    }
+    const { error } = await supabase
+      .from('suggestions')
+      .update(payload)
+      .eq('id', suggestionId);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
+export async function deleteSuggestionFromSupabase(suggestionId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('suggestions').delete().eq('id', suggestionId);
     return !error;
   } catch {
     return false;

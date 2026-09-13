@@ -531,3 +531,80 @@ VALUES
   ('post_1', 'adrielaturinda4@gmail.com', 'Online Corporate Community', '', 'Welcome to the Online Corporate unified professional feed! Share your business updates, career achievements, and collaborate with professionals across Uganda and beyond.', 1726050000000, '[]'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
+-- ==============================================================================
+-- 13. SUGGESTIONS & FEEDBACK TO ADMIN TABLE
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.suggestions (
+  id TEXT PRIMARY KEY,
+  sender_email TEXT NOT NULL,
+  sender_name TEXT NOT NULL,
+  sender_role TEXT DEFAULT 'Member',
+  sender_photo TEXT DEFAULT '',
+  target_admin_email TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'General Feedback',
+  subject TEXT NOT NULL,
+  content TEXT NOT NULL,
+  urgency TEXT NOT NULL DEFAULT 'Normal', -- 'Normal', 'High', 'Urgent'
+  status TEXT NOT NULL DEFAULT 'Pending', -- 'Pending', 'Under Review', 'Planned', 'Completed', 'Declined'
+  admin_response TEXT DEFAULT '',
+  created_at_ms BIGINT NOT NULL,
+  updated_at_ms BIGINT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+CREATE INDEX IF NOT EXISTS idx_suggestions_sender ON public.suggestions(sender_email);
+CREATE INDEX IF NOT EXISTS idx_suggestions_target ON public.suggestions(target_admin_email);
+CREATE INDEX IF NOT EXISTS idx_suggestions_status ON public.suggestions(status);
+CREATE INDEX IF NOT EXISTS idx_suggestions_created ON public.suggestions(created_at DESC);
+
+ALTER TABLE public.suggestions ENABLE ROW LEVEL SECURITY;
+
+-- Senders can view their suggestions, and administrators can view all suggestions
+DROP POLICY IF EXISTS "Senders and admins can view suggestions" ON public.suggestions;
+CREATE POLICY "Senders and admins can view suggestions"
+ON public.suggestions FOR SELECT
+USING (
+  auth.role() = 'anon'
+  OR LOWER(sender_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+  OR EXISTS (SELECT 1 FROM public.profiles WHERE profiles.email = auth.jwt() ->> 'email' AND profiles.is_admin = true)
+);
+
+-- Users can submit suggestions
+DROP POLICY IF EXISTS "Users can submit suggestions" ON public.suggestions;
+CREATE POLICY "Users can submit suggestions"
+ON public.suggestions FOR INSERT
+WITH CHECK (
+  auth.role() = 'anon'
+  OR LOWER(sender_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+);
+
+-- Admins and senders can update suggestion status or admin response
+DROP POLICY IF EXISTS "Admins can update suggestions" ON public.suggestions;
+CREATE POLICY "Admins can update suggestions"
+ON public.suggestions FOR UPDATE
+USING (
+  auth.role() = 'anon'
+  OR LOWER(sender_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+  OR EXISTS (SELECT 1 FROM public.profiles WHERE profiles.email = auth.jwt() ->> 'email' AND profiles.is_admin = true)
+);
+
+-- Admins or senders can delete suggestions
+DROP POLICY IF EXISTS "Admins or senders can delete suggestions" ON public.suggestions;
+CREATE POLICY "Admins or senders can delete suggestions"
+ON public.suggestions FOR DELETE
+USING (
+  auth.role() = 'anon'
+  OR LOWER(sender_email) = LOWER(COALESCE(auth.jwt() ->> 'email', ''))
+  OR EXISTS (SELECT 1 FROM public.profiles WHERE profiles.email = auth.jwt() ->> 'email' AND profiles.is_admin = true)
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'suggestions') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.suggestions;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  NULL;
+END;
+$$;
+

@@ -61,7 +61,8 @@ import {
   CreditCard,
   Database,
   Loader2,
-  Receipt
+  Receipt,
+  Lightbulb
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppStorage } from './useAppStorage';
@@ -75,6 +76,7 @@ import {
 } from './lib/supabase';
 import { VerifiedBadge } from './components/VerifiedBadge';
 import { AIDocumentVerificationModal } from './components/AIDocumentVerificationModal';
+import { SuggestionArea } from './components/SuggestionArea';
 
 // --- Sub-components (Simplified for now, can be extracted later) ---
 
@@ -132,11 +134,15 @@ export default function App() {
     deleteCommunityPost,
     deleteEvent,
     broadcastNotification,
+    suggestions,
+    submitSuggestion,
+    updateSuggestionStatus,
+    deleteSuggestion,
     isPasswordRecovery,
     setIsPasswordRecovery
   } = useAppStorage();
 
-  const [activePage, setActivePage] = useState<'home' | 'jobs' | 'messages' | 'notifications' | 'card' | 'discover' | 'community' | 'events' | 'applications' | 'about' | 'admin'>('about');
+  const [activePage, setActivePage] = useState<'home' | 'jobs' | 'messages' | 'notifications' | 'card' | 'discover' | 'community' | 'events' | 'applications' | 'about' | 'admin' | 'suggestions'>('about');
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -165,7 +171,7 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('oc_dark') === 'true');
 
   // Admin Controls State
-  const [adminTab, setAdminTab] = useState<'verifications' | 'users' | 'jobs' | 'community' | 'broadcast'>('verifications');
+  const [adminTab, setAdminTab] = useState<'verifications' | 'users' | 'jobs' | 'community' | 'broadcast' | 'suggestions'>('verifications');
   const [adminSearchQuery, setAdminSearchQuery] = useState('');
   const [adminRoleFilter, setAdminRoleFilter] = useState<'all' | 'Employee' | 'Employer' | 'BusinessOwner'>('all');
   const [adminDocPreview, setAdminDocPreview] = useState<{ user: User } | null>(null);
@@ -1439,6 +1445,12 @@ export default function App() {
             { id: 'messages', label: 'Messages', icon: MessageSquare, badge: Object.values(messages).flat().filter((m: any) => m.from !== currentUser?.email && !m.read).length },
             { id: 'notifications', label: 'Notifications', icon: Bell, badge: notifications.filter(n => !n.read).length },
             { id: 'card', label: 'My Card', icon: UserCircle },
+            { 
+              id: 'suggestions', 
+              label: 'Suggestion Box', 
+              icon: Lightbulb, 
+              badge: isMainAdmin ? suggestions.filter(s => s.status === 'Pending').length : 0 
+            },
             ...(isMainAdmin ? [{ id: 'admin', label: 'Admin Controls', icon: Shield, badge: pendingVerificationsCount }] : []),
           ].map(item => (
             <button
@@ -1522,16 +1534,34 @@ export default function App() {
           </button>
           
           <h2 className="text-lg font-serif font-bold text-oc-navy dark:text-oc-gold-light hidden sm:block ml-4 lg:ml-0">
-            {activePage.charAt(0).toUpperCase() + activePage.slice(1)}
+            {activePage === 'suggestions' ? 'Suggestion Box & Feedback' : activePage.charAt(0).toUpperCase() + activePage.slice(1)}
           </h2>
 
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
             {currentUser && (
               <>
+                <button 
+                  onClick={() => setActivePage('suggestions')}
+                  className={`relative px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 font-bold text-xs border cursor-pointer ${
+                    activePage === 'suggestions' 
+                      ? 'bg-oc-gold text-oc-navy border-oc-gold shadow-md font-extrabold' 
+                      : 'bg-oc-gold/10 hover:bg-oc-gold/20 text-oc-navy dark:text-oc-gold border-oc-gold/20'
+                  }`}
+                  title="Direct Suggestions & Feedback to Admin"
+                >
+                  <Lightbulb size={15} className="text-oc-gold shrink-0" />
+                  <span className="hidden sm:inline">Suggestion Box</span>
+                  {isMainAdmin && suggestions.filter(s => s.status === 'Pending').length > 0 && (
+                    <span className="bg-amber-500 text-white font-black text-[9px] px-1.5 py-0.2 rounded-full animate-pulse">
+                      {suggestions.filter(s => s.status === 'Pending').length}
+                    </span>
+                  )}
+                </button>
+
                 {isMainAdmin && (
                   <button 
                     onClick={() => setActivePage('admin')}
-                    className={`relative px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 font-bold text-xs border ${
+                    className={`relative px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 font-bold text-xs border cursor-pointer ${
                       activePage === 'admin' 
                         ? 'bg-oc-gold text-oc-navy border-oc-gold shadow-md font-extrabold' 
                         : 'bg-oc-gold/10 hover:bg-oc-gold/20 text-oc-navy dark:text-oc-gold border-oc-gold/20'
@@ -2920,6 +2950,23 @@ export default function App() {
                       <Bell size={16} />
                       System Broadcast
                     </button>
+
+                    <button
+                      onClick={() => setAdminTab('suggestions')}
+                      className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+                        adminTab === 'suggestions'
+                          ? 'bg-oc-navy text-oc-gold dark:bg-oc-gold dark:text-oc-navy shadow-lg font-black'
+                          : 'bg-white dark:bg-oc-navy text-gray-500 hover:text-oc-navy dark:hover:text-white border border-oc-gold/10'
+                      }`}
+                    >
+                      <Lightbulb size={16} />
+                      Member Suggestions ({suggestions.length})
+                      {suggestions.filter(s => s.status === 'Pending').length > 0 && (
+                        <span className="bg-amber-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                          {suggestions.filter(s => s.status === 'Pending').length}
+                        </span>
+                      )}
+                    </button>
                   </div>
 
                   {/* TAB 1: IDENTITY VERIFICATION QUEUE */}
@@ -3465,8 +3512,48 @@ export default function App() {
                       </form>
                     </div>
                   )}
+
+                  {/* TAB 6: MEMBER SUGGESTIONS & FEEDBACK */}
+                  {adminTab === 'suggestions' && (
+                    <div className="space-y-6">
+                      <SuggestionArea 
+                        currentUser={currentUser}
+                        users={users}
+                        suggestions={suggestions}
+                        onSubmitSuggestion={submitSuggestion}
+                        onUpdateSuggestionStatus={updateSuggestionStatus}
+                        onDeleteSuggestion={deleteSuggestion}
+                        onOpenChat={(adminEmail) => {
+                          setActivePage('messages');
+                          setActiveConversation(adminEmail);
+                          markThreadAsRead(adminEmail);
+                        }}
+                        isAdmin={isMainAdmin}
+                      />
+                    </div>
+                  )}
                 </div>
                 )
+              )}
+
+              {/* Suggestions Page (Accessible by all members and admins) */}
+              {activePage === 'suggestions' && (
+                <div className="max-w-6xl mx-auto space-y-6">
+                  <SuggestionArea 
+                    currentUser={currentUser}
+                    users={users}
+                    suggestions={suggestions}
+                    onSubmitSuggestion={submitSuggestion}
+                    onUpdateSuggestionStatus={updateSuggestionStatus}
+                    onDeleteSuggestion={deleteSuggestion}
+                    onOpenChat={(adminEmail) => {
+                      setActivePage('messages');
+                      setActiveConversation(adminEmail);
+                      markThreadAsRead(adminEmail);
+                    }}
+                    isAdmin={isMainAdmin}
+                  />
+                </div>
               )}
 
               {activePage === 'card' && currentUser && (

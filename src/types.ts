@@ -165,3 +165,31 @@ export interface Appointment {
   status: 'Scheduled' | 'Completed' | 'Cancelled';
   createdAt: number;
 }
+
+export type SuggestionCategory = 
+  | 'Feature Request' 
+  | 'Platform Improvement' 
+  | 'Corporate Tool' 
+  | 'Bug Report' 
+  | 'Policy & Compliance' 
+  | 'General Feedback';
+
+export type SuggestionStatus = 'Pending' | 'Under Review' | 'Planned' | 'Completed' | 'Declined';
+export type SuggestionUrgency = 'Normal' | 'High' | 'Urgent';
+
+export interface Suggestion {
+  id: string;
+  senderEmail: string;
+  senderName: string;
+  senderRole?: string;
+  senderPhoto?: string;
+  targetAdminEmail: string;
+  category: SuggestionCategory;
+  subject: string;
+  content: string;
+  urgency: SuggestionUrgency;
+  status: SuggestionStatus;
+  adminResponse?: string;
+  createdAt: number;
+  updatedAt: number;
+}

@@ -1,5 +1,22 @@
 import { useState, useEffect } from 'react';
-import { User, Announcement, Job, Notification, Message, JobSearchHistory, CommunityPost, PortfolioItem, ProfessionalEvent, JobApplication, ApplicationStatus, Appointment } from './types';
+import { 
+  User, 
+  Announcement, 
+  Job, 
+  Notification, 
+  Message, 
+  JobSearchHistory, 
+  CommunityPost, 
+  PortfolioItem, 
+  ProfessionalEvent, 
+  JobApplication, 
+  ApplicationStatus, 
+  Appointment,
+  Suggestion,
+  SuggestionCategory,
+  SuggestionStatus,
+  SuggestionUrgency
+} from './types';
 import { 
   supabase, 
   signOutFromSupabase, 
@@ -23,7 +40,11 @@ import {
   fetchCommunityPostsFromSupabase,
   createCommunityPostInSupabase,
   updateCommunityPostLikesInSupabase,
-  deleteCommunityPostFromSupabase
+  deleteCommunityPostFromSupabase,
+  fetchSuggestionsFromSupabase,
+  createSuggestionInSupabase,
+  updateSuggestionStatusInSupabase,
+  deleteSuggestionFromSupabase
 } from './lib/supabase';
 
 export function useAppStorage() {
@@ -38,6 +59,7 @@ export function useAppStorage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [searchHistory, setSearchHistory] = useState<JobSearchHistory[]>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
@@ -204,6 +226,28 @@ export function useAppStorage() {
       }
     }).catch(() => {});
 
+    // Load cached suggestions
+    try {
+      const savedSugg = localStorage.getItem('oc_suggestions');
+      if (savedSugg) setSuggestions(JSON.parse(savedSugg));
+    } catch (e) {}
+
+    // Synchronize suggestions from Supabase
+    fetchSuggestionsFromSupabase().then(remoteSugg => {
+      if (remoteSugg && remoteSugg.length > 0) {
+        setSuggestions(prev => {
+          const map = new Map<string, Suggestion>();
+          remoteSugg.forEach(s => map.set(s.id, s));
+          prev.forEach(s => {
+            if (!map.has(s.id)) map.set(s.id, s);
+          });
+          const merged = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+          localStorage.setItem('oc_suggestions', JSON.stringify(merged));
+          return merged;
+        });
+      }
+    }).catch(() => {});
+
     setIsLoading(false);
   }, []);
 
@@ -308,6 +352,26 @@ export function useAppStorage() {
       }
     }).catch(() => {});
   }, [currentUser?.email]);
+
+  // Synchronize suggestions from Supabase for current user or admin
+  useEffect(() => {
+    if (!currentUser?.email) return;
+    const isAdm = Boolean(currentUser.isAdmin || currentUser.role === 'Admin');
+    fetchSuggestionsFromSupabase(currentUser.email, isAdm).then(remoteSugg => {
+      if (remoteSugg && remoteSugg.length > 0) {
+        setSuggestions(prev => {
+          const map = new Map<string, Suggestion>();
+          remoteSugg.forEach(s => map.set(s.id, s));
+          prev.forEach(s => {
+            if (!map.has(s.id)) map.set(s.id, s);
+          });
+          const merged = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+          localStorage.setItem('oc_suggestions', JSON.stringify(merged));
+          return merged;
+        });
+      }
+    }).catch(() => {});
+  }, [currentUser?.email, currentUser?.isAdmin, currentUser?.role]);
 
   const saveUser = (user: User) => {
     const cleanEmail = user.email.trim().toLowerCase();
@@ -729,6 +793,120 @@ export function useAppStorage() {
     localStorage.setItem('oc_appointments', JSON.stringify(newList));
   };
 
+  const submitSuggestion = (data: {
+    category: SuggestionCategory;
+    subject: string;
+    content: string;
+    urgency?: SuggestionUrgency;
+    targetAdminEmail?: string;
+  }): { success: boolean; targetAdmin: string; suggestion: Suggestion } | null => {
+    if (!currentUser || !data.subject.trim() || !data.content.trim()) return null;
+
+    const senderClean = currentUser.email.trim().toLowerCase();
+    
+    // Determine the designated admin recipient:
+    // 1. If explicit targetAdminEmail provided, use it
+    // 2. Otherwise find an admin among registered users (isAdmin or role === 'Admin')
+    // 3. Fallback to default admin email 'adrielaturinda4@gmail.com'
+    const availableAdmins = (Object.values(users) as User[]).filter(
+      u => (Boolean(u.isAdmin) || (u.role as string) === 'Admin') && u.email.trim().toLowerCase() !== senderClean
+    );
+
+    let targetAdmin = data.targetAdminEmail?.trim().toLowerCase();
+    if (!targetAdmin) {
+      if (availableAdmins.length > 0) {
+        targetAdmin = availableAdmins[0].email.trim().toLowerCase();
+      } else {
+        targetAdmin = 'adrielaturinda4@gmail.com';
+      }
+    }
+
+    const senderDisplayName = currentUser.name || currentUser.bizName || senderClean;
+    const newSuggestion: Suggestion = {
+      id: `sugg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      senderEmail: senderClean,
+      senderName: senderDisplayName,
+      senderRole: currentUser.role || 'Member',
+      senderPhoto: currentUser.photo || currentUser.logo || '',
+      targetAdminEmail: targetAdmin,
+      category: data.category,
+      subject: data.subject.trim(),
+      content: data.content.trim(),
+      urgency: data.urgency || 'Normal',
+      status: 'Pending',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+
+    // 1. Update state & localStorage
+    const updated = [newSuggestion, ...suggestions.filter(s => s.id !== newSuggestion.id)];
+    setSuggestions(updated);
+    localStorage.setItem('oc_suggestions', JSON.stringify(updated));
+
+    // 2. Persist to Supabase
+    createSuggestionInSupabase(newSuggestion).catch(() => {});
+
+    // 3. DIRECTLY SEND REAL CHAT MESSAGE TO THE ADMIN
+    const formattedChatText = `💡 [OFFICIAL SUGGESTION: ${newSuggestion.category.toUpperCase()}]
+Urgency: ${newSuggestion.urgency}
+Subject: ${newSuggestion.subject}
+
+${newSuggestion.content}
+
+— Submitted directly by ${senderDisplayName} (${senderClean})`;
+
+    sendMessage(targetAdmin, formattedChatText);
+
+    // 4. Send high-priority notification to the Admin
+    addNotificationTo(targetAdmin, {
+      type: 'msg',
+      text: `💡 New Suggestion: "${newSuggestion.subject}"`,
+      sub: `From ${senderDisplayName} [${newSuggestion.category}] - ${newSuggestion.content.slice(0, 50)}...`
+    });
+
+    return { success: true, targetAdmin, suggestion: newSuggestion };
+  };
+
+  const updateSuggestionStatus = (
+    suggestionId: string, 
+    status: SuggestionStatus, 
+    adminResponse?: string
+  ) => {
+    const updated = suggestions.map(s => {
+      if (s.id === suggestionId) {
+        return {
+          ...s,
+          status,
+          adminResponse: adminResponse !== undefined ? adminResponse : s.adminResponse,
+          updatedAt: Date.now()
+        };
+      }
+      return s;
+    });
+    setSuggestions(updated);
+    localStorage.setItem('oc_suggestions', JSON.stringify(updated));
+    updateSuggestionStatusInSupabase(suggestionId, status, adminResponse).catch(() => {});
+
+    const targetSugg = suggestions.find(s => s.id === suggestionId);
+    if (targetSugg && adminResponse && currentUser) {
+      const adminName = currentUser.name || currentUser.bizName || 'Online Corporate Administration';
+      const replyMsg = `RE: Suggestion [${targetSugg.subject}] Status: ${status}\n\n${adminResponse}\n\n— ${adminName}`;
+      sendMessage(targetSugg.senderEmail, replyMsg);
+      addNotificationTo(targetSugg.senderEmail, {
+        type: 'msg',
+        text: `Update on your suggestion: "${targetSugg.subject}" (${status})`,
+        sub: adminResponse.slice(0, 60)
+      });
+    }
+  };
+
+  const deleteSuggestion = (suggestionId: string) => {
+    const updated = suggestions.filter(s => s.id !== suggestionId);
+    setSuggestions(updated);
+    localStorage.setItem('oc_suggestions', JSON.stringify(updated));
+    deleteSuggestionFromSupabase(suggestionId).catch(() => {});
+  };
+
   return {
     currentUser,
     users,
@@ -741,6 +919,11 @@ export function useAppStorage() {
     events,
     applications,
     appointments,
+    suggestions,
+    setSuggestions,
+    submitSuggestion,
+    updateSuggestionStatus,
+    deleteSuggestion,
     isLoading,
     isPasswordRecovery,
     setIsPasswordRecovery,
